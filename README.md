@@ -105,4 +105,4 @@ node build.mjs     # writes app/assets/game/index.html and dist/index.html
 
 Open `game_src/dist/index.html` in a browser to try changes without Flutter.
 
-Ideas: add objects to `TYPES` in `objects.js` and place them in a level's `items` in `levels.js`; add a level to `LEVELS` (and its room to `SHELLS`); change `UNLOCK_AT` to make unlocking harder or easier; add vehicles in `vehicles.js` and `VEHICLE_SPOTS` in `main.js`; change the neon signs in the `neonSign(...)` calls.
+Ideas: add objects to `TYPES` in `objects.js` and place them in a level's `items` in `levels.js`; add a level to `LEVELS` (and its room to `SHELLS`); change `UNLOCK_AT` to make unlocking harder or easier; add vehicles in `vehicles.js` and `VEHICLE_SPOTS` in `main.js`; change the neon signs in `SHELLS` in `levels.js`.
