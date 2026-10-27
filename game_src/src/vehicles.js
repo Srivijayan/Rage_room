@@ -47,7 +47,7 @@ function wheel(b, x, z, r, w) {
   const g = new THREE.Group();
   g.position.set(x, r, z);
   b.group.add(g);
-  const info = { group: g, x, z, r, punctured: false };
+  const info = { group: g, x, z, r, punctured: false, hp: 2 }; // knife stabs to go flat
   const tire = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 22), rubber);
   const rim = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.6, r * 0.6, w + 0.01, 16), rimMat);
   for (const m of [tire, rim]) {

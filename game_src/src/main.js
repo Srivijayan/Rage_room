@@ -194,7 +194,7 @@ const seatMat = new THREE.MeshStandardMaterial({ map: fabricTexture('#34509e'), 
 // knife can slash them as well as the bat and fists.
 function busSeat(lx, lz, width = 0.8) {
   const x = BUS_X + lx, z = BUS_Z + lz;
-  return { name: 'bus seat', hp: 4, soft: true, obstacle: { x: x - 0.02, z, w: 0.5, d: width, rot: 0 }, boxes: [
+  return { name: 'bus seat', hp: 8, soft: true, obstacle: { x: x - 0.02, z, w: 0.5, d: width, rot: 0 }, boxes: [
     [0.12, 0.35, width * 0.6, x, BUS_FLOOR + 0.175, z, metalMat],
     [0.45, 0.1, width, x, BUS_FLOOR + 0.4, z, seatMat],
     [0.08, 0.6, width, x - 0.22, BUS_FLOOR + 0.7, z, seatMat],
@@ -210,29 +210,29 @@ BUS_SEATS.push(busSeat(4.0, -0.6, 0.5)); // driver
 
 const FURNITURE = [
   ...BUS_SEATS,
-  { name: 'table', hp: 6, obstacle: { x: 0, z: 0.05, w: 2.7, d: 1.0, rot: 0 }, boxes: [
+  { name: 'table', hp: 12, obstacle: { x: 0, z: 0.05, w: 2.7, d: 1.0, rot: 0 }, boxes: [
     [2.7, 0.08, 1.0, 0, 0.78, 0.05, MATS.wood],
     ...[[-1.25, -0.38], [1.25, -0.38], [-1.25, 0.48], [1.25, 0.48]].map(([x, z]) => [0.08, 0.74, 0.08, x, 0.37, z, MATS.darkWood]),
   ] },
-  { name: 'shelf', hp: 8, obstacle: { x: 0, z: SHELF_Z, w: 4.3, d: 0.5, rot: 0 }, boxes: [
+  { name: 'shelf', hp: 16, obstacle: { x: 0, z: SHELF_Z, w: 4.3, d: 0.5, rot: 0 }, boxes: [
     [4.2, 0.04, 0.5, 0, SHELF_LOW - 0.02, SHELF_Z, MATS.darkWood],
     [4.2, 0.04, 0.5, 0, SHELF_HIGH - 0.02, SHELF_Z, MATS.darkWood],
     [0.06, 1.8, 0.5, -2.1, 0.9, SHELF_Z, metalMat],
     [0.06, 1.8, 0.5, 2.1, 0.9, SHELF_Z, metalMat],
   ] },
-  { name: 'tv crate', hp: 6, obstacle: { x: -2.35, z: -1.3, w: 0.9, d: 0.7, rot: 0.45 }, boxes: [
+  { name: 'tv crate', hp: 12, obstacle: { x: -2.35, z: -1.3, w: 0.9, d: 0.7, rot: 0.45 }, boxes: [
     [0.9, 0.95, 0.7, -2.35, 0.475, -1.3, MATS.wood, 0.45],
   ] },
-  { name: 'monitor desk', hp: 4, obstacle: { x: 2.35, z: -1.3, w: 0.9, d: 0.6, rot: -0.45 }, boxes: [
+  { name: 'monitor desk', hp: 8, obstacle: { x: 2.35, z: -1.3, w: 0.9, d: 0.6, rot: -0.45 }, boxes: [
     [0.9, 0.06, 0.6, 2.35, 0.72, -1.3, MATS.darkWood, -0.45],
     [0.08, 0.7, 0.5, 2.35, 0.35, -1.3, metalMat, -0.45],
   ] },
-  { name: 'workbench', hp: 8, obstacle: { x: -0.6, z: BENCH_Z, w: 4, d: 0.7, rot: 0 }, boxes: [
+  { name: 'workbench', hp: 16, obstacle: { x: -0.6, z: BENCH_Z, w: 4, d: 0.7, rot: 0 }, boxes: [
     [4, 0.06, 0.7, -0.6, BENCH_TOP - 0.03, BENCH_Z, MATS.darkWood],
     [0.08, 0.84, 0.6, -2.5, 0.42, BENCH_Z, metalMat],
     [0.08, 0.84, 0.6, 1.3, 0.42, BENCH_Z, metalMat],
   ] },
-  { name: 'bed', hp: 10, obstacle: { x: 13.85, z: 3.6, w: 2.1, d: 1.55, rot: 0 }, boxes: [
+  { name: 'bed', hp: 20, obstacle: { x: 13.85, z: 3.6, w: 2.1, d: 1.55, rot: 0 }, boxes: [
     [2.0, 0.26, 1.5, 13.8, 0.17, 3.6, MATS.darkWood],
     [0.08, 0.95, 1.55, 14.84, 0.475, 3.6, MATS.darkWood],
   ] },
@@ -587,7 +587,7 @@ function hitVehiclePart(part, point, dir, weapon, hit) {
       breakPart(part, dir);
       break;
     case 'tire':
-      if (weapon === 'knife') punctureWheel(part.wheel, v, point);
+      if (weapon === 'knife') punctureWheel(part.wheel, v, point, hit);
       else { sfx.thud(); haptic('hit'); }
       break;
     case 'panel':
@@ -612,8 +612,11 @@ function hitVehiclePart(part, point, dir, weapon, hit) {
 }
 
 // A stabbed tyre hisses, goes flat, and the vehicle sags onto that corner.
-function punctureWheel(wheel, v, point) {
+function punctureWheel(wheel, v, point, hit) {
   if (wheel.punctured) { sfx.rip(); return; }
+  if (hit) addCut(hit, 0.08);
+  wheel.hp -= 1;
+  if (wheel.hp > 0) { sfx.scrape(); haptic('hit'); return; } // not through the rubber yet
   wheel.punctured = true;
   countSmash();
   sfx.hiss();
@@ -1310,6 +1313,7 @@ function hitSoft(ent, hit, dir, weapon, rel) {
   addCut(hit, ent.type.kind === 'rubber' ? 0.08 : rand(0.12, 0.24));
   haptic('hit');
   if (ent.type.kind === 'rubber') {
+    if (ent.hp > 0) { sfx.scrape(); return; } // not through the rubber yet
     // Spare tyre: hiss and go flat
     ent.punctured = true;
     countSmash();
