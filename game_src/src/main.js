@@ -2,18 +2,27 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx, unlockAudio, setMuted, isMuted } from './audio.js';
-import { brickTexture, concreteTexture, neonTexture, hazardTexture, crackedGlassTexture } from './textures.js';
+import { neonTexture, crackedGlassTexture } from './textures.js';
 import { TYPES, MATS, drawScreen, crackScreen, rand, pick } from './objects.js';
 import { buildCar, buildBus } from './vehicles.js';
+import { LEVELS, SHELLS, UNLOCK_AT, BUS_X, BUS_Z } from './levels.js';
 
 // ---------------------------------------------------------------------------
 // Renderer, scene, camera
 // ---------------------------------------------------------------------------
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+// Phones get a lower starting resolution and no MSAA on very dense screens;
+// adaptResolution() then tunes the resolution to keep the frame rate up.
+const MAX_PIXEL_RATIO = Math.min(window.devicePixelRatio, isTouch ? 1.5 : 2);
+const MIN_PIXEL_RATIO = isTouch ? 0.75 : 1;
+const renderer = new THREE.WebGLRenderer({
+  antialias: !(isTouch && window.devicePixelRatio > 1.5),
+  powerPreference: 'high-performance',
+});
+renderer.setPixelRatio(MAX_PIXEL_RATIO);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 document.getElementById('app').appendChild(renderer.domElement);
@@ -28,17 +37,58 @@ scene.environmentIntensity = 0.4;
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.05, 45);
 camera.rotation.order = 'YXZ';
 const EYE = 1.6;
-const player = { x: 0, z: 2.6, vx: 0, vz: 0, bob: 0 };
+const player = { x: 0, z: 2.6, vx: 0, vz: 0, bob: 0, floor: 0 }; // floor: height stood on (bus floor, door step)
 camera.position.set(player.x, EYE, player.z);
 scene.add(camera);
 
-const look = { yaw: 0, pitch: -0.18 };
+// Input moves the target angles; the camera eases toward them each frame.
+const look = { yaw: 0, pitch: -0.18, targetYaw: 0, targetPitch: -0.18 };
+
+function turnView(dYaw, dPitch) {
+  look.targetYaw += dYaw;
+  look.targetPitch = THREE.MathUtils.clamp(look.targetPitch + dPitch, -0.85, 0.35);
+}
+
+let pixelRatio = MAX_PIXEL_RATIO;
+let pixelRatioCeiling = MAX_PIXEL_RATIO;
+const framePerf = { frames: 0, time: 0 };
+function adaptResolution(rawDt) {
+  if (rawDt > 0.25) return; // tab was hidden; ignore
+  framePerf.frames++;
+  framePerf.time += rawDt;
+  if (framePerf.time < 2) return;
+  const avg = framePerf.time / framePerf.frames;
+  framePerf.frames = 0;
+  framePerf.time = 0;
+  let next = pixelRatio;
+  if (avg > 1 / 45) {
+    next = Math.max(MIN_PIXEL_RATIO, pixelRatio - 0.25);
+    pixelRatioCeiling = next; // don't climb back to a resolution that was too slow
+  } else if (avg < 1 / 57) {
+    next = Math.min(pixelRatioCeiling, pixelRatio + 0.25);
+  }
+  if (next !== pixelRatio) {
+    pixelRatio = next;
+    renderer.setPixelRatio(next);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+}
+
+// Zoom scales the field of view: below 1 zooms in, above 1 zooms out.
+const ZOOM_MIN = 0.4, ZOOM_MAX = 1.25;
+const zoomState = { current: 1, target: 1 };
+function zoomBy(factor) {
+  zoomState.target = THREE.MathUtils.clamp(zoomState.target * factor, ZOOM_MIN, ZOOM_MAX);
+}
+function applyFov() {
+  camera.fov = (camera.aspect < 1 ? 82 : 65) * zoomState.current; // wider view in portrait phones
+  camera.updateProjectionMatrix();
+}
 
 function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
   camera.aspect = w / h;
-  camera.fov = camera.aspect < 1 ? 82 : 65; // wider view in portrait phones
-  camera.updateProjectionMatrix();
+  applyFov();
   renderer.setSize(w, h);
 }
 window.addEventListener('resize', onResize);
@@ -47,13 +97,14 @@ onResize();
 // ---------------------------------------------------------------------------
 // Lights
 // ---------------------------------------------------------------------------
-scene.add(new THREE.HemisphereLight(0x8890b0, 0x201814, 0.55));
+// Few lights on purpose: each one adds work to every pixel on screen.
+scene.add(new THREE.HemisphereLight(0x8890b0, 0x201814, 0.85));
 
 const spot = new THREE.SpotLight(0xfff1dc, 60, 12, Math.PI / 4.2, 0.45, 1.6);
 spot.position.set(0.4, 4.2, 1.4);
 spot.target.position.set(0, 0.6, -0.9);
 spot.castShadow = true;
-spot.shadow.mapSize.set(1024, 1024);
+spot.shadow.mapSize.set(isTouch ? 512 : 1024, isTouch ? 512 : 1024);
 spot.shadow.bias = -0.0004;
 scene.add(spot, spot.target);
 
@@ -63,21 +114,14 @@ garageSpot.position.set(9.5, 4.6, 1.2);
 garageSpot.target.position.set(9.5, 0, 0.4);
 scene.add(garageSpot, garageSpot.target);
 
+// Light inside the bus (its roof blocks the garage light)
+const busLight = new THREE.PointLight(0xfff2d8, 3, 8, 1.5);
+busLight.position.set(9.5, 2.2, -1.6);
+scene.add(busLight);
+
 const neonLight = new THREE.PointLight(0xff2d6f, 6, 6, 1.5);
 neonLight.position.set(0, 2.4, -2.4);
 scene.add(neonLight);
-
-const sideLight = new THREE.PointLight(0x2f7bff, 4, 7, 1.5);
-sideLight.position.set(-3, 2.2, 0.5);
-scene.add(sideLight);
-
-const bedLamp = new THREE.PointLight(0xffc27a, 4, 6, 1.5);
-bedLamp.position.set(13.6, 2.4, 3.6);
-scene.add(bedLamp);
-
-const garageGlow = new THREE.PointLight(0xff8a3d, 5, 9, 1.5);
-garageGlow.position.set(14, 2.6, 3);
-scene.add(garageGlow);
 
 // Re-used flash light for impacts (kept in the scene to avoid shader recompiles).
 const flash = new THREE.PointLight(0xffd29a, 0, 3, 2);
@@ -91,104 +135,201 @@ world.broadphase = new CANNON.NaiveBroadphase();
 world.allowSleep = true;
 world.defaultContactMaterial.friction = 0.45;
 world.defaultContactMaterial.restitution = 0.15;
-world.solver.iterations = 8;
+world.solver.iterations = 7;
 
 const staticMeshes = [];
 
-function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0 } = {}) {
+function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0, parent = scene } = {}) {
+  let mesh = null;
   if (visible) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
     mesh.position.set(x, y, z);
     mesh.rotation.y = rotY;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    scene.add(mesh);
+    parent.add(mesh);
     staticMeshes.push(mesh);
   }
   const body = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, d / 2)) });
   body.position.set(x, y, z);
   body.quaternion.setFromEuler(0, rotY, 0);
   world.addBody(body);
+  body.mesh = mesh;
   return body;
 }
 
 // ---------------------------------------------------------------------------
-// The building: the rage room on the left, a garage on the right
+// The rooms. Each level's shell is built once and shown only while it is played.
 // ---------------------------------------------------------------------------
-const wallMat = new THREE.MeshStandardMaterial({ map: brickTexture(4, 2), roughness: 0.9 });
-const longWallMat = new THREE.MeshStandardMaterial({ map: brickTexture(9, 2), roughness: 0.9 });
-const floorMat = new THREE.MeshStandardMaterial({ map: concreteTexture(6), roughness: 0.85 });
-floorMat.map.repeat.set(7, 3);
-const metalMat = new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.5, metalness: 0.7 });
-
-const ROOM = { minX: -3.5, maxX: 15.1, minZ: -2.9, maxZ: 4.9 };
-staticBox(19, 0.1, 8.5, 5.7, -0.05, 1.0, floorMat);
-staticBox(19, 4, 0.2, 5.7, 2, -3, longWallMat);
-staticBox(19, 4, 0.2, 5.7, 2, 5.0, longWallMat);
-staticBox(0.2, 4, 8.2, -3.6, 2, 1.0, wallMat);
-staticBox(0.2, 4, 8.2, 15.2, 2, 1.0, wallMat);
-
-// Hazard stripe where the garage starts
-const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 7.8), new THREE.MeshStandardMaterial({ map: hazardTexture(), roughness: 0.8 }));
-stripe.rotation.x = -Math.PI / 2;
-stripe.position.set(3.95, 0.003, 1.0);
-stripe.receiveShadow = true;
-scene.add(stripe);
-
-// Table in front of the player
-const TABLE_TOP = 0.82;
-staticBox(2.7, 0.08, 1.0, 0, 0.78, 0.05, MATS.wood);
-for (const [x, z] of [[-1.25, -0.38], [1.25, -0.38], [-1.25, 0.48], [1.25, 0.48]]) {
-  staticBox(0.08, 0.74, 0.08, x, 0.37, z, MATS.darkWood);
-}
-
-// Back shelf
-const SHELF_Z = -2.55;
-const SHELF_LOW = 0.92, SHELF_HIGH = 1.67;
-staticBox(4.2, 0.04, 0.5, 0, SHELF_LOW - 0.02, SHELF_Z, MATS.darkWood);
-staticBox(4.2, 0.04, 0.5, 0, SHELF_HIGH - 0.02, SHELF_Z, MATS.darkWood);
-for (const x of [-2.1, 2.1]) staticBox(0.06, 1.8, 0.5, x, 0.9, SHELF_Z, metalMat);
-
-// Crate for the TV and a small desk for the monitor
-staticBox(0.9, 0.95, 0.7, -2.35, 0.475, -1.3, MATS.wood, { rotY: 0.45 });
-staticBox(0.9, 0.06, 0.6, 2.35, 0.72, -1.3, MATS.darkWood, { rotY: -0.45 });
-staticBox(0.08, 0.7, 0.5, 2.35, 0.35, -1.3, metalMat, { rotY: -0.45 });
-
-// Workbench along the front wall (behind the starting spot)
-const BENCH_TOP = 0.9, BENCH_Z = 4.5;
-staticBox(4, 0.06, 0.7, -0.6, BENCH_TOP - 0.03, BENCH_Z, MATS.darkWood);
-for (const x of [-2.5, 1.3]) staticBox(0.08, 0.84, 0.6, x, 0.42, BENCH_Z, metalMat);
-
-// Bed frame in the far corner of the garage (the mattress on it can be ripped)
-const BED_TOP = 0.3;
-staticBox(2.0, 0.26, 1.5, 13.8, 0.17, 3.6, MATS.darkWood);
-staticBox(0.08, 0.95, 1.55, 14.84, 0.475, 3.6, MATS.darkWood);
-
-// Neon signs
-function neonSign(text, x, y, z) {
+const neons = [];
+function neonSign(text, x, y, z, parent) {
   const m = new THREE.Mesh(
     new THREE.PlaneGeometry(2.4, 0.6),
     new THREE.MeshBasicMaterial({ map: neonTexture(text), transparent: true, toneMapped: false }),
   );
   m.position.set(x, y, z);
-  scene.add(m);
-  return m;
+  parent.add(m);
+  neons.push(m);
 }
-const neons = [neonSign('SMASH IT', 0, 2.45, -2.88), neonSign('WRECK IT', 9.5, 3.45, -2.88)];
+
+const shellGroups = {};
+for (const [key, shell] of Object.entries(SHELLS)) {
+  const group = new THREE.Group();
+  for (const [w, h, d, x, y, z, mat] of shell.boxes) staticBox(w, h, d, x, y, z, mat, { parent: group });
+  for (const [w, d, x, y, z, mat] of shell.ceilings) {
+    const c = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+    c.rotation.x = Math.PI / 2; // facing down
+    c.position.set(x, y, z);
+    group.add(c);
+  }
+  for (const [text, x, y, z] of shell.neons) neonSign(text, x, y, z, group);
+  scene.add(group);
+  shellGroups[key] = group;
+}
+
+let level = LEVELS[0];
+let ROOM = level.room;
+
+// Furniture stays put until it is smashed. Then it collapses into pieces and
+// everything standing on it falls. kind: 'wood' (default), 'metal' or 'glass'.
+const furniture = [];
+
+function buildFurniture() {
+  for (const f of furniture) if (!f.broken) removeFurniturePieces(f);
+  furniture.length = 0;
+  for (const def of level.furniture()) {
+    const f = { def, hp: def.hp, broken: false, pieces: [], obstacle: { ...def.obstacle } };
+    for (const [w, h, d, x, y, z, mat, rotY = 0] of def.boxes) {
+      const body = staticBox(w, h, d, x, y, z, mat, { rotY });
+      body.mesh.userData.furniture = f;
+      f.pieces.push({ body, mesh: body.mesh, size: [w, h, d], pos: [x, y, z] });
+    }
+    obstacles.push(f.obstacle);
+    furniture.push(f);
+  }
+}
+
+function removeFurniturePieces(f) {
+  for (const p of f.pieces) {
+    scene.remove(p.mesh);
+    world.removeBody(p.body);
+    const i = staticMeshes.indexOf(p.mesh);
+    if (i >= 0) staticMeshes.splice(i, 1);
+  }
+  const oi = obstacles.indexOf(f.obstacle);
+  if (oi >= 0) obstacles.splice(oi, 1);
+}
+
+// Things standing on a piece of furniture hop when it is hit.
+function joltFurniture(f, strength) {
+  const o = f.obstacle;
+  const r = Math.max(o.w, o.d) / 2 + 0.3;
+  for (const e of entities) {
+    const p = e.body.position;
+    if (e.held || Math.hypot(p.x - o.x, p.z - o.z) > r) continue;
+    e.body.wakeUp();
+    e.body.velocity.set(e.body.velocity.x + rand(-0.4, 0.4), e.body.velocity.y + rand(0.6, 1.2) * strength,
+      e.body.velocity.z + rand(-0.4, 0.4));
+  }
+}
+
+function hitFurniture(f, hit, dir, weapon) {
+  const kind = f.def.kind || 'wood';
+  if (kind === 'glass') { collapseFurniture(f, dir); return; } // any hit shatters glass
+  if (weapon === 'knife' && f.def.soft) {
+    f.hp -= 1;
+    addCut(hit, rand(0.12, 0.24));
+    sfx.rip();
+    spillStuffing('foam', hit.point, 0.6);
+    haptic('hit');
+    if (f.hp <= 0) collapseFurniture(f, dir);
+    return;
+  }
+  if (weapon === 'knife') {
+    // A knife only carves wood and scratches metal
+    addCut(hit, rand(0.1, 0.2), kind === 'metal' ? scratchMat : cutMat);
+    sfx.scrape();
+    haptic('hit');
+    return;
+  }
+  const dmg = WEAPONS[weapon].damage;
+  f.hp -= dmg;
+  joltFurniture(f, dmg * 0.6);
+  if (f.hp <= 0) { collapseFurniture(f, dir); return; }
+  if (kind === 'metal') {
+    addCut(hit, rand(0.1, 0.2), scratchMat);
+    burst(hit.point, 0xffd08a, 18, 2.5, true);
+    sfx.metal(weapon === 'fists' ? 0.6 : 1);
+  } else {
+    addCut(hit, rand(0.15, 0.3)); // a crack in the wood
+    burst(hit.point, 0xb08a60, 25, 1.8, false);
+    if (weapon === 'fists') sfx.punch(); else sfx.wood();
+  }
+  shake = Math.max(shake, 0.035);
+  haptic('hit');
+}
+
+function collapseFurniture(f, dir) {
+  f.broken = true;
+  removeFurniturePieces(f);
+  if (f.def.soft) {
+    const [x, y, z] = f.pieces[1].pos;
+    spillStuffing('foam', new THREE.Vector3(x, y, z), 2);
+    sfx.rip();
+  }
+  const kind = f.def.kind || 'wood';
+  if (kind === 'glass') {
+    // A pane bursts into flat shards
+    for (const p of f.pieces) {
+      const [w, h, d] = p.size;
+      const [x, y, z] = p.pos;
+      const n = THREE.MathUtils.clamp(Math.round(Math.max(w * h, h * d) * 10), 8, 26);
+      for (let i = 0; i < n; i++) {
+        const b = rand(0.06, 0.16);
+        const pos = new THREE.Vector3(x + rand(-0.5, 0.5) * w, y + rand(-0.5, 0.5) * h, z + rand(-0.5, 0.5) * d);
+        const vel = dir.clone().multiplyScalar(rand(1.5, 4)).add(new THREE.Vector3(rand(-1, 1), rand(0, 2), rand(-1, 1)));
+        addShard(pick(shardGeos), p.mesh.material, pos, new THREE.Vector3(b, b * rand(0.1, 0.25), b * rand(0.6, 1.3)), vel);
+      }
+      burst(new THREE.Vector3(x, y, z), 0xe6f4ff, 60, 3, true);
+    }
+    for (const e of entities) e.body.wakeUp();
+    countSmash();
+    sfx.glass(1.3);
+    shake = Math.max(shake, 0.05);
+    haptic('heavy');
+    return;
+  }
+  for (const p of f.pieces) {
+    const [w, h, d] = p.size;
+    const [x, y, z] = p.pos;
+    const n = THREE.MathUtils.clamp(Math.round((w * d + w * h + h * d) * 6), 2, 10);
+    for (let i = 0; i < n; i++) {
+      const scale = new THREE.Vector3(
+        Math.min(w, rand(0.2, 0.55)),
+        Math.min(h, Math.max(rand(0.03, 0.06), h * rand(0.3, 0.6))),
+        Math.min(d, rand(0.06, 0.16)),
+      );
+      const pos = new THREE.Vector3(x + rand(-0.4, 0.4) * w, y + rand(-0.4, 0.4) * h, z + rand(-0.4, 0.4) * d);
+      const vel = dir.clone().multiplyScalar(rand(1, 3)).add(new THREE.Vector3(rand(-1.5, 1.5), rand(0.5, 2.5), rand(-1.5, 1.5)));
+      addShard(boxChunk, p.mesh.material, pos, scale, vel);
+    }
+    burst(new THREE.Vector3(x, y, z), kind === 'metal' ? 0x9a9a9a : 0xb08a60, 30, 2, false);
+  }
+  // Everything that was resting on it is now in free fall
+  for (const e of entities) e.body.wakeUp();
+  countSmash();
+  if (kind === 'metal') sfx.metal(1.2); else sfx.wood();
+  sfx.thud();
+  shake = Math.max(shake, 0.07);
+  haptic('heavy');
+}
 
 // Footprints of the furniture, so the player walks around it instead of through it.
 const PLAYER_R = 0.28;
-const obstacles = [
-  { x: 0, z: 0.05, w: 2.7, d: 1.0, rot: 0 },
-  { x: 0, z: SHELF_Z, w: 4.3, d: 0.5, rot: 0 },
-  { x: -2.35, z: -1.3, w: 0.9, d: 0.7, rot: 0.45 },
-  { x: 2.35, z: -1.3, w: 0.9, d: 0.6, rot: -0.45 },
-  { x: -0.6, z: BENCH_Z, w: 4, d: 0.7, rot: 0 },
-  { x: 13.85, z: 3.6, w: 2.1, d: 1.55, rot: 0 },
-];
+const obstacles = []; // furniture and vehicles add theirs
 
 // The player's body pushes bottles and shards around when walking into them.
-const playerBody = new CANNON.Body({ type: CANNON.Body.KINEMATIC, shape: new CANNON.Cylinder(PLAYER_R, PLAYER_R, 1.7, 10) });
+const playerBody = new CANNON.Body({ type: CANNON.Body.KINEMATIC, shape: new CANNON.Box(new CANNON.Vec3(PLAYER_R, 0.85, PLAYER_R)) });
 playerBody.isPlayer = true;
 playerBody.position.set(player.x, 0.85, player.z);
 world.addBody(playerBody);
@@ -225,12 +366,12 @@ function resolvePlayer() {
 const entities = [];
 const shards = [];
 const pendingBreaks = new Set();
-const MAX_SHARDS = 220;
+const MAX_SHARDS = 160;
 let smashed = 0;
 
 function countSmash() {
   smashed++;
-  ui.count.textContent = `${smashed} smashed`;
+  updateHud();
 }
 
 function spawn(typeName, x, baseY, z, rotY = Math.random() * Math.PI * 2, tilt = 0) {
@@ -244,8 +385,8 @@ function spawn(typeName, x, baseY, z, rotY = Math.random() * Math.PI * 2, tilt =
   body.ent = ent;
   body.position.set(x, baseY + type.h / 2 + 0.003, z);
   body.quaternion.setFromEuler(tilt, rotY, 0, 'YXZ');
-  body.sleepSpeedLimit = 0.15;
-  body.sleepTimeLimit = 0.6;
+  body.sleepSpeedLimit = 0.25; // settle quickly so resting things cost nothing
+  body.sleepTimeLimit = 0.4;
   body.linearDamping = 0.05;
   body.angularDamping = 0.1;
   body.addEventListener('collide', (e) => {
@@ -259,14 +400,18 @@ function spawn(typeName, x, baseY, z, rotY = Math.random() * Math.PI * 2, tilt =
   ent.body = body;
   scene.add(mesh);
   world.addBody(body);
+  body.interpolatedPosition.copy(body.position);
+  body.interpolatedQuaternion.copy(body.quaternion);
   syncEnt(ent);
   entities.push(ent);
   return ent;
 }
 
-function syncEnt(e) {
-  e.mesh.position.copy(e.body.position);
-  e.mesh.quaternion.copy(e.body.quaternion);
+// Meshes follow the physics engine's interpolated pose, so motion stays
+// smooth on 90/120 Hz screens where frames fall between physics steps.
+function syncEnt(e, interpolate = true) {
+  e.mesh.position.copy(interpolate ? e.body.interpolatedPosition : e.body.position);
+  e.mesh.quaternion.copy(interpolate ? e.body.interpolatedQuaternion : e.body.quaternion);
 }
 
 function removeEnt(ent) {
@@ -278,65 +423,15 @@ function removeEnt(ent) {
   if (i >= 0) entities.splice(i, 1);
 }
 
-function layoutRoom() {
-  // Table: glasses, bottles, plates, mugs
-  [-1.05, -0.88, -0.71].forEach((x) => spawn('tumbler', x, TABLE_TOP, 0.25));
-  [-0.45, -0.25].forEach((x) => spawn('wine', x, TABLE_TOP, 0.3));
-  [0.05, 0.22, 0.39].forEach((x) => spawn('bottle', x, TABLE_TOP, 0.12));
-  for (let i = 0; i < 4; i++) spawn('plate', 0.85, TABLE_TOP + i * 0.023, 0.2, 0);
-  [-1.0, -0.72].forEach((x) => spawn('mug', x, TABLE_TOP, -0.2));
-  spawn('vase', -0.25, TABLE_TOP, -0.22);
-  spawn('wine', 0.62, TABLE_TOP, -0.15);
-  spawn('tumbler', 1.12, TABLE_TOP, -0.15);
-
-  // Lower shelf: vases and bottles
-  [-1.5, -0.5, 0.6, 1.55].forEach((x) => spawn('vase', x, SHELF_LOW, SHELF_Z));
-  [-1.05, 0.05, 1.05].forEach((x) => spawn('bottle', x, SHELF_LOW, SHELF_Z));
-  // Upper shelf: a row of glasses
-  for (let i = 0; i < 12; i++) spawn(i % 3 === 1 ? 'wine' : 'tumbler', -1.8 + i * 0.33, SHELF_HIGH, SHELF_Z);
-
-  // Electronics
-  spawn('tv', -2.35, 0.95, -1.3, 0.45);
-  spawn('monitor', 2.35, 0.75, -1.3, -0.45);
-
-  // Workbench: laptop, lamp, teapot, jars, plants, printer (screens face the room)
-  spawn('laptop', -2.1, BENCH_TOP, BENCH_Z, Math.PI);
-  spawn('lamp', -1.6, BENCH_TOP, BENCH_Z + 0.1);
-  spawn('teapot', -1.15, BENCH_TOP, BENCH_Z);
-  [-0.8, -0.62, -0.44].forEach((x) => spawn('jar', x, BENCH_TOP, BENCH_Z));
-  [-0.05, 0.35].forEach((x) => spawn('flowerpot', x, BENCH_TOP, BENCH_Z));
-  spawn('printer', 0.9, BENCH_TOP, BENCH_Z, Math.PI);
-
-  // Floor: chairs, crates, a standing mirror and a few strays
-  spawn('chair', -1.9, 0, 1.6, 2.6);
-  spawn('chair', 1.9, 0, 1.7, -2.4);
-  spawn('crate', 2.9, 0, 3.9, 0.2);
-  spawn('crate', 3.0, 0, 3.3, -0.1);
-  spawn('crate', 2.95, 0.5, 3.6, 0.5);
-  spawn('mirror', -3.38, 0, 1.6, Math.PI / 2, -0.1);
-  spawn('vase', 1.75, 0, 0.7);
-  spawn('bottle', -1.75, 0, 0.75);
-
-  // Bed with pillows and a teddy
-  spawn('mattress', 13.8, BED_TOP, 3.6, 0);
-  spawn('pillow', 14.45, BED_TOP + 0.22, 3.25, Math.PI / 2);
-  spawn('pillow', 14.45, BED_TOP + 0.22, 3.95, Math.PI / 2);
-  spawn('teddy', 13.95, BED_TOP + 0.22, 3.6, -Math.PI / 2);
-
-  // Sofa against the front wall, with seat cushions and a pillow
-  spawn('sofa', 5.4, 0, 4.45, Math.PI);
-  [-0.53, 0, 0.53].forEach((dx) => spawn('cushion', 5.4 + dx, 0.52, 4.37, Math.PI));
-  spawn('pillow', 4.9, 0.66, 4.4, Math.PI + 0.3);
-
-  // Spare tyres stacked by the bus
-  for (let i = 0; i < 3; i++) spawn('tyre', 14.45, i * 0.181, 0.75, rand(0, 6));
+function layoutLevel() {
+  for (const [type, x, y, z, rotY, tilt] of level.items()) spawn(type, x, y, z, rotY ?? Math.random() * Math.PI * 2, tilt ?? 0);
 }
 
 // ---------------------------------------------------------------------------
 // Vehicles
 // ---------------------------------------------------------------------------
 const VEHICLE_SPOTS = [
-  { build: () => buildBus(), x: 9.5, z: -1.6 },
+  { build: () => buildBus(), x: BUS_X, z: BUS_Z },
   { build: () => buildCar(0xc8102e), x: 9.0, z: 3.0 },
 ];
 const vehicles = [];
@@ -362,12 +457,21 @@ for (const spotDef of VEHICLE_SPOTS) {
     });
     return body;
   });
-  obstacles.push({ x: spotDef.x, z: spotDef.z, w: v.footprint.w, d: v.footprint.d, rot: 0 });
+  if (v.interior) {
+    // Walk-in vehicle: block only its walls (with the door gap) and remember its floor
+    spotDef.interior = v.interior;
+    for (const c of v.colliders) {
+      if (c.h > 1.5) obstacles.push({ x: spotDef.x + c.x, z: spotDef.z + c.z, w: c.w, d: Math.max(c.d, 0.12), rot: 0 });
+    }
+  } else {
+    obstacles.push({ x: spotDef.x, z: spotDef.z, w: v.footprint.w, d: v.footprint.d, rot: 0 });
+  }
 }
 
 function buildVehicles() {
   for (const v of vehicles) { scene.remove(v.group); v.stopAlarm?.(); }
   vehicles.length = 0;
+  if (!level.vehicles) return;
   for (const spotDef of VEHICLE_SPOTS) {
     const v = spotDef.build();
     v.group.position.set(spotDef.x, 0, spotDef.z);
@@ -406,7 +510,7 @@ function hitVehiclePart(part, point, dir, weapon, hit) {
       breakPart(part, dir);
       break;
     case 'tire':
-      if (weapon === 'knife') punctureWheel(part.wheel, v, point);
+      if (weapon === 'knife') punctureWheel(part.wheel, v, point, hit);
       else { sfx.thud(); haptic('hit'); }
       break;
     case 'panel':
@@ -431,8 +535,11 @@ function hitVehiclePart(part, point, dir, weapon, hit) {
 }
 
 // A stabbed tyre hisses, goes flat, and the vehicle sags onto that corner.
-function punctureWheel(wheel, v, point) {
+function punctureWheel(wheel, v, point, hit) {
   if (wheel.punctured) { sfx.rip(); return; }
+  if (hit) addCut(hit, 0.08);
+  wheel.hp -= 1;
+  if (wheel.hp > 0) { sfx.scrape(); haptic('hit'); return; } // not through the rubber yet
   wheel.punctured = true;
   countSmash();
   sfx.hiss();
@@ -529,17 +636,129 @@ function processVehicleImpacts() {
   vehicleImpacts.length = 0;
 }
 
-function resetRoom() {
-  if (held) { held = null; }
+// ---------------------------------------------------------------------------
+// Levels
+// ---------------------------------------------------------------------------
+const save = loadSave();
+const levelStats = { entities: 0, furniture: 0, parts: 0 };
+let levelDone = 0; // fraction smashed
+let completeShown = false;
+
+function loadSave() {
+  const fallback = { unlocked: 1, best: {} };
+  try {
+    const raw = window.localStorage.getItem('rageroom.progress');
+    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
+  } catch (_) { return fallback; }
+}
+function storeSave() {
+  try { window.localStorage.setItem('rageroom.progress', JSON.stringify(save)); } catch (_) { /* progress just isn't kept */ }
+}
+
+// Things in a vehicle that count toward the level: glass, lights, mirrors, tyres.
+const countsForLevel = (part) => ['window', 'light', 'mirror'].includes(part.kind);
+
+function loadLevel(index) {
+  level = LEVELS[index];
+  ROOM = level.room;
+  if (held) dropHeld();
   for (const e of [...entities]) removeEnt(e);
   for (const s of shards) { scene.remove(s.mesh); world.removeBody(s.body); }
   shards.length = 0;
   pendingBreaks.clear();
   tweens.length = 0;
-  layoutRoom();
+  for (const [key, group] of Object.entries(shellGroups)) group.visible = key === level.shell;
+  setLevelLights(level.lights);
+  buildFurniture();
+  layoutLevel();
   buildVehicles();
+
+  levelStats.entities = entities.length;
+  levelStats.furniture = furniture.length;
+  levelStats.parts = vehicles.reduce((n, v) => n + v.parts.filter(countsForLevel).length + v.wheels.length, 0);
+  smashed = 0;
+  levelDone = 0;
+  completeShown = (save.best[index] ?? 0) >= 1;
+  player.x = level.spawn.x; player.z = level.spawn.z; player.vx = player.vz = 0; player.floor = 0;
+  look.yaw = look.targetYaw = level.spawn.yaw;
+  look.pitch = look.targetPitch = -0.18;
+  ui.levelName.textContent = `Level ${index + 1} · ${level.name}`;
   ui.cleared.hidden = true;
-  clearedShown = false;
+  ui.map.hidden = true;
+  updateHud();
+}
+
+function levelProgress() {
+  const total = levelStats.entities + levelStats.furniture + levelStats.parts;
+  const entsLeft = entities.filter((e) => !e.punctured).length;
+  let done = levelStats.entities - entsLeft + furniture.filter((f) => f.broken).length;
+  for (const v of vehicles) done += v.parts.filter((p) => countsForLevel(p) && p.broken).length + v.wheels.filter((w) => w.punctured).length;
+  return total ? Math.min(1, done / total) : 1;
+}
+
+function updateHud() {
+  const pct = Math.round(levelDone * 100);
+  ui.count.textContent = `${smashed} smashed · ${pct}%`;
+  ui.barFill.style.width = `${pct}%`;
+  ui.bar.classList.toggle('done', levelDone >= UNLOCK_AT);
+}
+
+function checkLevelProgress() {
+  const index = LEVELS.indexOf(level);
+  levelDone = levelProgress();
+  updateHud();
+  if (levelDone > (save.best[index] ?? 0)) { save.best[index] = levelDone; storeSave(); }
+  if (levelDone >= UNLOCK_AT && save.unlocked < index + 2 && index + 1 < LEVELS.length) {
+    save.unlocked = index + 2;
+    storeSave();
+    showComplete(`${LEVELS[index + 1].name} unlocked!`, `You smashed ${Math.round(levelDone * 100)}% of the ${level.name}.`);
+  } else if (levelDone >= 1 && !completeShown) {
+    completeShown = true;
+    showComplete('Everything destroyed 😤', index + 1 < LEVELS.length ? 'Not a single thing left standing.' : 'You wrecked every level. Feeling better?');
+  }
+}
+
+function showComplete(title, text) {
+  const index = LEVELS.indexOf(level);
+  document.exitPointerLock?.();
+  ui.clearTitle.textContent = title;
+  ui.clearText.textContent = text;
+  ui.next.hidden = index + 1 >= LEVELS.length || save.unlocked < index + 2;
+  ui.cleared.hidden = false;
+}
+
+function setLevelLights(l) {
+  const [mx, my, mz, mtx, mty, mtz] = l.main;
+  spot.position.set(mx, my, mz);
+  spot.target.position.set(mtx, mty, mtz);
+  const [fx, fy, fz, ftx, fty, ftz, fi] = l.fill;
+  garageSpot.position.set(fx, fy, fz);
+  garageSpot.target.position.set(ftx, fty, ftz);
+  garageSpot.intensity = fi;
+  neonLight.position.set(...l.neon);
+  busLight.intensity = l.bus ? 3 : 0;
+}
+
+function openMap() {
+  document.exitPointerLock?.();
+  const current = LEVELS.indexOf(level);
+  ui.mapList.innerHTML = '';
+  LEVELS.forEach((lv, i) => {
+    const locked = i + 1 > save.unlocked;
+    const best = Math.round((save.best[i] ?? 0) * 100);
+    const stop = document.createElement('button');
+    stop.className = `stop${locked ? ' locked' : ''}${i === current ? ' here' : ''}`;
+    stop.disabled = locked;
+    stop.innerHTML = `<span class="dot">${locked ? '🔒' : i + 1}</span><span class="info"><b>${lv.name}</b><small>${locked ? `Smash ${Math.round(UNLOCK_AT * 100)}% of ${LEVELS[i - 1].name} to open` : lv.blurb}</small></span><span class="best">${locked ? '' : `${best}%`}</span>`;
+    stop.addEventListener('click', () => loadLevel(i));
+    ui.mapList.appendChild(stop);
+  });
+  ui.cleared.hidden = true;
+  ui.map.hidden = false;
+}
+
+function resetRoom() {
+  loadLevel(LEVELS.indexOf(level));
 }
 
 // ---------------------------------------------------------------------------
@@ -557,8 +776,7 @@ const boxChunk = new THREE.BoxGeometry(1, 1, 1);
 function addShard(geo, mat, pos, scale, vel) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.scale.copy(scale);
-  mesh.castShadow = true;
-  scene.add(mesh);
+  scene.add(mesh); // shards don't cast shadows: dozens of tiny casters are costly
   const body = new CANNON.Body({
     mass: Math.max(0.01, scale.x * scale.y * scale.z * 40),
     shape: new CANNON.Box(new CANNON.Vec3(scale.x * 0.55, scale.y * 0.55, scale.z * 0.55)),
@@ -569,9 +787,13 @@ function addShard(geo, mat, pos, scale, vel) {
   body.velocity.set(vel.x, vel.y, vel.z);
   body.angularVelocity.set(rand(-15, 15), rand(-15, 15), rand(-15, 15));
   body.linearDamping = 0.1;
-  body.sleepSpeedLimit = 0.25;
-  body.sleepTimeLimit = 0.4;
+  body.sleepSpeedLimit = 0.35;
+  body.sleepTimeLimit = 0.3;
+  body.interpolatedPosition.copy(body.position);
+  body.interpolatedQuaternion.copy(body.quaternion);
   world.addBody(body);
+  mesh.position.copy(body.position);
+  mesh.quaternion.copy(body.quaternion);
   shards.push({ mesh, body });
   trimShards();
   return mesh;
@@ -752,10 +974,10 @@ function flashAt(p, intensity) {
 // Weapons: bat, fists, knife, and bare hands for grabbing
 // ---------------------------------------------------------------------------
 const WEAPONS = {
-  bat: { reach: 1.7, damage: 2, push: 1 },
-  fists: { reach: 1.25, damage: 1, push: 0.45 },
-  knife: { reach: 1.3, damage: 1, push: 0.15 },
-  grab: { reach: 1.6, damage: 0, push: 0 },
+  bat: { reach: 2.0, damage: 2, push: 1 },
+  fists: { reach: 1.4, damage: 1, push: 0.45 },
+  knife: { reach: 1.5, damage: 1, push: 0.15 },
+  grab: { reach: 1.8, damage: 0, push: 0 },
 };
 
 // Soft things and tyres shrug off blunt hits; only a blade gets through.
@@ -978,6 +1200,7 @@ function tryGrab(ndc) {
   if (outOfReach(hit, WEAPONS.grab.reach)) { toast('Walk closer to grab'); return; }
   const ent = hit.object.userData.ent;
   if (hit.object.userData.part) { toast('Way too heavy to lift'); return; }
+  if (hit.object.userData.furniture) { toast('Too heavy to lift — smash it instead'); return; }
   if (!ent || !ent.alive) return;
   if (ent.type.mass > MAX_LIFT) { toast('Too heavy to lift'); return; }
   held = ent;
@@ -1097,7 +1320,10 @@ function doHit(ndc, weapon) {
     return;
   }
 
-  // Wall / table / floor
+  const f = hit.object.userData.furniture;
+  if (f && !f.broken) { hitFurniture(f, hit, dir, weapon); return; }
+
+  // Wall / floor
   burst(hit.point, 0x9a8f85, 20, 1.5, false);
   if (weapon === 'fists') sfx.punch(); else sfx.thud();
   shake = Math.max(shake, 0.02);
@@ -1121,6 +1347,7 @@ function hitSoft(ent, hit, dir, weapon, rel) {
   addCut(hit, ent.type.kind === 'rubber' ? 0.08 : rand(0.12, 0.24));
   haptic('hit');
   if (ent.type.kind === 'rubber') {
+    if (ent.hp > 0) { sfx.scrape(); return; } // not through the rubber yet
     // Spare tyre: hiss and go flat
     ent.punctured = true;
     countSmash();
@@ -1158,28 +1385,77 @@ function haptic(kind) {
 const canvas = renderer.domElement;
 const drag = { id: null, x: 0, y: 0, sx: 0, sy: 0, moved: false };
 
+// On a computer, clicking locks the mouse for proper first-person aiming:
+// moving the mouse turns, clicking hits whatever is under the crosshair.
+const mouseLocked = () => document.pointerLockElement === canvas;
+const CENTER = new THREE.Vector2(0, 0);
+document.addEventListener('pointerlockchange', () => {
+  document.body.classList.toggle('locked', mouseLocked());
+});
+document.addEventListener('pointerlockerror', () => { /* not allowed here: drag-to-look still works */ });
+document.addEventListener('mousemove', (e) => {
+  // Some browsers report one huge jump right after locking; ignore spikes
+  if (!mouseLocked() || Math.abs(e.movementX) > 250 || Math.abs(e.movementY) > 250) return;
+  const k = 0.0022 * zoomState.current; // finer aim when zoomed in
+  turnView(-e.movementX * k, -e.movementY * k);
+});
+
+// Two fingers on the screen pinch to zoom.
+const touches = new Map();
+let pinchDist = 0;
+const touchSpread = () => {
+  const [a, b] = [...touches.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+
 canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
+  if (mouseLocked()) { act(CENTER); return; }
+  if (e.pointerType === 'touch') {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) {
+      pinchDist = touchSpread();
+      drag.id = null; // a pinch is neither a look-drag nor a tap
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* optional */ }
+      return;
+    }
+  }
+  if (!isTouch && e.pointerType === 'mouse' && canvas.requestPointerLock) {
+    try {
+      const req = canvas.requestPointerLock();
+      if (req && req.catch) req.catch(() => {});
+    } catch (_) { /* fall back to drag-to-look */ }
+  }
   if (drag.id !== null) return;
   drag.id = e.pointerId;
   drag.x = drag.sx = e.clientX;
   drag.y = drag.sy = e.clientY;
   drag.moved = false;
-  canvas.setPointerCapture(e.pointerId);
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* refused while the mouse is being locked */ }
 });
 canvas.addEventListener('pointermove', (e) => {
+  if (touches.has(e.pointerId)) {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size >= 2) {
+      const dist = touchSpread();
+      if (pinchDist > 0 && dist > 0) zoomBy(pinchDist / dist);
+      pinchDist = dist;
+      return;
+    }
+  }
   if (e.pointerId !== drag.id) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 10) drag.moved = true;
   if (drag.moved) {
-    const k = 1.6 / Math.min(window.innerWidth, window.innerHeight);
-    look.yaw -= dx * k;
-    look.pitch = THREE.MathUtils.clamp(look.pitch - dy * k, -0.85, 0.35);
+    const k = (1.5 / Math.min(window.innerWidth, window.innerHeight)) * zoomState.current;
+    turnView(-dx * k, -dy * k);
   }
   drag.x = e.clientX; drag.y = e.clientY;
 });
 const endPointer = (e) => {
-  if (e.pointerId !== drag.id) return;
+  touches.delete(e.pointerId);
+  if (touches.size < 2) pinchDist = 0;
+  if (e.pointerId !== drag.id || mouseLocked()) { if (e.pointerId === drag.id) drag.id = null; return; }
   drag.id = null;
   if (!drag.moved && e.type === 'pointerup') {
     const r = canvas.getBoundingClientRect();
@@ -1189,12 +1465,24 @@ const endPointer = (e) => {
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 
+function showZoom() { toast(`Zoom ${(1 / zoomState.target).toFixed(1)}×`); }
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  zoomBy(Math.exp(e.deltaY * 0.0012));
+  showZoom();
+}, { passive: false });
+document.getElementById('zoom-in').addEventListener('click', () => { zoomBy(1 / 1.3); showZoom(); });
+document.getElementById('zoom-out').addEventListener('click', () => { zoomBy(1.3); showZoom(); });
+
 const keys = new Set();
 const MODE_KEYS = { Digit1: 'bat', Digit2: 'fists', Digit3: 'knife', Digit4: 'grab' };
 window.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'Space') { e.preventDefault(); act(new THREE.Vector2(0, 0)); }
   if (e.code === 'KeyR') resetRoom();
+  if (e.code === 'KeyM') { if (ui.map.hidden) openMap(); else ui.map.hidden = true; }
+  if (e.code === 'Equal' || e.code === 'NumpadAdd') { zoomBy(1 / 1.2); showZoom(); }
+  if (e.code === 'Minus' || e.code === 'NumpadSubtract') { zoomBy(1.2); showZoom(); }
   if (MODE_KEYS[e.code]) setMode(MODE_KEYS[e.code]);
   if (e.code === 'KeyQ') setMode({ bat: 'fists', fists: 'knife', knife: 'grab', grab: 'bat' }[mode]);
 });
@@ -1232,16 +1520,36 @@ for (const b of document.querySelectorAll('#modes button')) {
   b.addEventListener('click', () => { unlockAudio(); setMode(b.dataset.mode); });
 }
 
-const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (isTouch) document.body.classList.add('touch');
 if (new URLSearchParams(location.search).has('app')) document.body.classList.add('in-app');
 document.getElementById('hint').textContent = isTouch
-  ? 'Joystick to walk · Drag to look · Tap to hit'
-  : 'WASD to walk · Drag to look · Click to hit · 1-4 to switch';
+  ? 'Joystick to walk · Drag to look · Pinch to zoom · Tap to hit'
+  : 'Click to lock the mouse · WASD to walk · Wheel to zoom · 1-4 to switch';
 
-const WALK_SPEED = 2.2;
+// Height of whatever the player stands on: a bus floor, its door step, or the ground.
+function floorHeightAt(x, z) {
+  for (const spotDef of VEHICLE_SPOTS) {
+    const r = spotDef.interior;
+    if (!r) continue;
+    const lx = x - spotDef.x, lz = z - spotDef.z;
+    if (lx > r.minX && lx < r.maxX && lz > r.minZ && lz < r.maxZ) return r.y;
+    const st = r.step;
+    if (Math.abs(lx - st.x) < st.w / 2 && lz >= st.minZ && lz < st.maxZ) return st.y;
+  }
+  return 0;
+}
+
+const WALK_SPEED = 2.6;
+const JOY_DEAD = 0.15;
 function updatePlayer(dt) {
-  let fwd = -joy.y, side = joy.x;
+  // Dead zone, then a gentle curve so small pushes give slow, precise steps
+  let jx = joy.x, jy = joy.y;
+  const jm = Math.hypot(jx, jy);
+  if (jm < JOY_DEAD) { jx = 0; jy = 0; } else {
+    const k = Math.pow((jm - JOY_DEAD) / (1 - JOY_DEAD), 1.5) / jm;
+    jx *= k; jy *= k;
+  }
+  let fwd = -jy, side = jx;
   if (keys.has('KeyW') || keys.has('ArrowUp')) fwd += 1;
   if (keys.has('KeyS') || keys.has('ArrowDown')) fwd -= 1;
   if (keys.has('KeyA') || keys.has('ArrowLeft')) side -= 1;
@@ -1260,8 +1568,9 @@ function updatePlayer(dt) {
   resolvePlayer();
   const moved = Math.hypot(player.x - ox, player.z - oz);
   if (moved > 0.0005) player.bob += moved * 9;
+  player.floor += (floorHeightAt(player.x, player.z) - player.floor) * (1 - Math.exp(-dt * 12));
   if (dt > 0) playerBody.velocity.set((player.x - ox) / dt, 0, (player.z - oz) / dt);
-  playerBody.position.set(player.x, 0.85, player.z);
+  playerBody.position.set(player.x, player.floor + 0.85, player.z);
 }
 
 // ---------------------------------------------------------------------------
@@ -1269,6 +1578,14 @@ function updatePlayer(dt) {
 // ---------------------------------------------------------------------------
 const ui = {
   count: document.getElementById('count'),
+  levelName: document.getElementById('level-name'),
+  bar: document.getElementById('bar'),
+  barFill: document.getElementById('bar-fill'),
+  map: document.getElementById('map'),
+  mapList: document.getElementById('map-list'),
+  clearTitle: document.getElementById('clear-title'),
+  clearText: document.getElementById('clear-text'),
+  next: document.getElementById('next'),
   hint: document.getElementById('hint'),
   cleared: document.getElementById('cleared'),
   mute: document.getElementById('mute'),
@@ -1276,6 +1593,11 @@ const ui = {
 };
 document.getElementById('reset').addEventListener('click', resetRoom);
 document.getElementById('refill').addEventListener('click', resetRoom);
+document.getElementById('map-btn').addEventListener('click', openMap);
+document.getElementById('map-close').addEventListener('click', () => { ui.map.hidden = true; });
+document.getElementById('keep').addEventListener('click', () => { ui.cleared.hidden = true; });
+document.getElementById('open-map').addEventListener('click', openMap);
+ui.next.addEventListener('click', () => loadLevel(LEVELS.indexOf(level) + 1));
 ui.mute.addEventListener('click', () => {
   setMuted(!isMuted());
   ui.mute.textContent = isMuted() ? '🔇' : '🔊';
@@ -1289,8 +1611,7 @@ function toast(text) {
   toastTimer = setTimeout(() => ui.toast.classList.remove('show'), 1100);
 }
 
-let clearedShown = false;
-let clearedTimer = 0;
+let progressTick = 0;
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -1301,12 +1622,23 @@ let screenTick = 0;
 const clock = new THREE.Clock();
 
 function frame() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
+  adaptResolution(rawDt);
+
+  // Ease the view toward where the player is pointing it
+  const ease = 1 - Math.exp(-dt * 30);
+  look.yaw += (look.targetYaw - look.yaw) * ease;
+  look.pitch += (look.targetPitch - look.pitch) * ease;
+  if (Math.abs(zoomState.target - zoomState.current) > 0.0005) {
+    zoomState.current += (zoomState.target - zoomState.current) * (1 - Math.exp(-dt * 14));
+    applyFov();
+  }
 
   updatePlayer(dt);
   slowMo = Math.max(0, slowMo - dt);
   const timeScale = slowMo > 0 ? 0.3 + 0.7 * (1 - slowMo / 0.55) ** 3 : 1;
-  world.step(1 / 60, dt * timeScale, 4);
+  world.step(1 / 60, dt * timeScale, 2); // at most 2 catch-up steps, so a slow frame can't snowball
 
   for (const ent of pendingBreaks) {
     const v = ent.body.velocity;
@@ -1320,8 +1652,9 @@ function frame() {
     if (e.body.position.y < -2) removeEnt(e);
   }
   for (const s of shards) {
-    s.mesh.position.copy(s.body.position);
-    s.mesh.quaternion.copy(s.body.quaternion);
+    if (s.body.sleepState === CANNON.Body.SLEEPING) continue;
+    s.mesh.position.copy(s.body.interpolatedPosition);
+    s.mesh.quaternion.copy(s.body.interpolatedQuaternion);
   }
 
   // Damaged screens flicker; alarmed cars flash their lights
@@ -1346,27 +1679,24 @@ function frame() {
   flash.intensity *= Math.pow(0.002, dt);
 
   camera.rotation.set(look.pitch, look.yaw, 0);
-  camera.position.set(player.x, EYE + Math.sin(player.bob) * 0.025, player.z);
+  camera.position.set(player.x, player.floor + EYE + Math.sin(player.bob) * 0.012, player.z);
   if (shake > 0.0005) {
-    camera.position.x += rand(-1, 1) * shake;
-    camera.position.y += rand(-1, 1) * shake;
+    camera.position.x += rand(-1, 1) * shake * 0.7;
+    camera.position.y += rand(-1, 1) * shake * 0.7;
     shake *= Math.pow(0.0005, dt);
   }
   updateHeld();
-  if (held) syncEnt(held);
+  if (held) syncEnt(held, false);
 
   for (const n of neons) n.material.opacity = Math.random() < 0.015 ? 0.4 : 1;
 
-  if (!clearedShown && entities.every((e) => e.punctured)) {
-    clearedTimer += dt;
-    if (clearedTimer > 1.2) { ui.cleared.hidden = false; clearedShown = true; }
-  } else clearedTimer = 0;
+  progressTick += dt;
+  if (progressTick > 0.3) { progressTick = 0; checkLevelProgress(); }
 
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 
 hands.l.visible = hands.r.visible = false;
-layoutRoom();
-buildVehicles();
+loadLevel(0);
 frame();

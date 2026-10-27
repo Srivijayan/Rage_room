@@ -1,23 +1,34 @@
 # Rage Room
 
-A 3D virtual rage room with a garage. Walk around, then smash glasses, bottles, plates, mugs, vases, jars, a teapot, plants, a lamp, a laptop, a printer, a CRT TV, a monitor, chairs, crates, a standing mirror, a bed with pillows and a teddy, a sofa, spare tyres, a car and a city bus. Runs on the web, Android and iOS from one Flutter project.
+A 3D smash-everything game in four levels. Runs on the web, Android and iOS from one Flutter project.
+
+**Levels** (open the 🗺 Map to switch; smash 80% of a level to unlock the next, progress is saved on the device)
+1. **Rage Room**: glasses, bottles, plates, vases, a TV, a monitor, a shelf, a workbench with a laptop, printer, lamp, teapot, jars and plants, chairs, crates and a standing mirror
+2. **Garage**: a car and a city bus (walk inside and smash the seats), a bed with pillows and a teddy, a sofa, spare tyres
+3. **Office**: desks with monitors, keyboards, laptops and mugs, office chairs, filing cabinets, glass walls around the manager's corner, a water cooler, a whiteboard, plants
+4. **Kitchen**: counters with a microwave, toaster, jars, plates and mugs, a fridge, a kitchen island, a dining table with chairs
 
 **Controls**
 - **Walk:** joystick (phone) or WASD / arrow keys (computer)
-- **Look around:** drag on the screen
+- **Look around:** drag on the screen (phone); on a computer, click once to lock the mouse, then move it to look and click to hit what's under the crosshair (Esc unlocks)
+- **Zoom:** pinch with two fingers (phone), mouse wheel (computer), the + / − buttons, or the + / − keys
 - **Hit / grab / throw:** tap (or click, or Space)
 - **Switch mode:** the Bat / Fists / Knife / Grab buttons, or keys 1 / 2 / 3 / 4 (Q cycles)
-- **Refill** brings everything back; 🔊 toggles sound
+- **Refill** restarts the level; **Map** (or M) shows the levels; 🔊 toggles sound
 
 **Modes**
-- **Bat**: 1.7 m reach, 2 damage per hit
-- **Fists**: 1.25 m reach, 1 damage per punch, left and right in turn
-- **Knife**: 1.3 m reach. The only thing that rips soft stuff: pillows burst into feathers, the mattress, sofa, cushions and teddy spill foam and tear apart, tyres (spare ones and the vehicles') hiss and go flat, and car paint gets scratched. Every stab leaves a cut mark.
-- **Grab**: pick up anything up to 15 kg, carry it, tap again to throw it. Thrown things break on impact, and can break vehicle windows.
+- **Bat**: 2 m reach, 2 damage per hit
+- **Fists**: 1.4 m reach, 1 damage per punch, left and right in turn
+- **Knife**: 1.5 m reach. The only thing that rips soft stuff: pillows burst into feathers, the mattress, sofa, cushions and teddy spill foam and tear apart, tyres (spare ones and the vehicles') hiss and go flat, and car paint gets scratched. Every stab leaves a cut mark.
+- **Grab**: 1.8 m reach; pick up anything up to 15 kg, carry it, tap again to throw it. Thrown things break on impact, and can break vehicle windows.
 
 You have to walk up to things (reach is measured along the floor, so you can bend down to tyres): anything further than your reach shows "Too far — walk closer".
 
-**Toughness:** glass and ceramics break in one hit; chairs and crates take 2 bat hits; the laptop 2; the monitor and printer 2; the TV 3 (twice as many punches each). Vehicle windows crack on the first hit and shatter on the next; lights and the bus destination board shatter in one hit; mirrors snap off; the bodywork dents where you hit it. Hitting the car sets off its alarm; hitting the bus sounds its horn. Bats and fists just bounce off soft things and tyres. A flat tyre makes the vehicle sag onto that corner. Soft things take knife stabs: pillows, cushions and the teddy 2, the mattress 5, the sofa 8.
+**Toughness:** glass (glasses, bottles, jars, the lamp, the mirror, vehicle windows and lights) breaks fast; everything else takes several hits. Bat hits to break: vases, plates, mugs, teapot and flower pots 2; laptop 3; monitor, printer, chairs and crates 4; the TV 6. Punches and knife stabs take twice as many as the bat. Vehicle windows crack on the first hit and shatter on the next; mirrors snap off; the bodywork dents where you hit it. Hitting the car sets off its alarm; hitting the bus sounds its horn. Bats and fists just bounce off soft things and tyres. Tyres take 2 knife stabs to go flat, and a flat tyre makes the vehicle sag onto that corner. Soft things take knife stabs: pillows, cushions and the teddy 4, the mattress 10, the sofa 16.
+
+**Inside the bus:** walk through the door on the lane side (between the wheels) and step up. Inside are 13 double seats and the driver's seat; each breaks after 4 bat hits (8 punches or knife slashes) into pieces and foam. You can break the windows and dent the walls from inside too.
+
+**Furniture breaks too:** the table, shelf, workbench, TV crate, monitor desk and bed frame crack with each bat hit or punch, make whatever is standing on them hop, and finally collapse into planks, dropping everything on top. Bat hits to break: monitor desk 4, table and TV crate 6, shelf and workbench 8, bed 10 (twice as many punches). A knife only carves them. Refill rebuilds them.
 
 ## Project layout
 
@@ -29,7 +40,8 @@ rage_room/
 │   ├── lib/game_view_web.dart     Runs the game in an iframe (web)
 │   └── assets/game/index.html     The built 3D game (generated, don't edit)
 └── game_src/     The 3D game itself (JavaScript)
-    ├── src/main.js      Building, walking, weapons, physics, smashing
+    ├── src/levels.js    The four levels: rooms, furniture, objects, lighting
+    ├── src/main.js      Walking, weapons, physics, smashing, level progress
     ├── src/objects.js   Every smashable object (look, physics, toughness)
     ├── src/vehicles.js  The car and the bus, built from breakable parts
     ├── src/audio.js     All sounds (synthesized, no audio files)
@@ -93,4 +105,4 @@ node build.mjs     # writes app/assets/game/index.html and dist/index.html
 
 Open `game_src/dist/index.html` in a browser to try changes without Flutter.
 
-Ideas: add objects to `TYPES` in `objects.js` and place them in `layoutRoom()` in `main.js`; add vehicles in `vehicles.js` and `VEHICLE_SPOTS` in `main.js`; change the neon signs in the `neonSign(...)` calls.
+Ideas: add objects to `TYPES` in `objects.js` and place them in a level's `items` in `levels.js`; add a level to `LEVELS` (and its room to `SHELLS`); change `UNLOCK_AT` to make unlocking harder or easier; add vehicles in `vehicles.js` and `VEHICLE_SPOTS` in `main.js`; change the neon signs in `SHELLS` in `levels.js`.
