@@ -9,11 +9,19 @@ import { buildCar, buildBus } from './vehicles.js';
 // ---------------------------------------------------------------------------
 // Renderer, scene, camera
 // ---------------------------------------------------------------------------
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+// Phones get a lower starting resolution and no MSAA on very dense screens;
+// adaptResolution() then tunes the resolution to keep the frame rate up.
+const MAX_PIXEL_RATIO = Math.min(window.devicePixelRatio, isTouch ? 1.5 : 2);
+const MIN_PIXEL_RATIO = isTouch ? 0.75 : 1;
+const renderer = new THREE.WebGLRenderer({
+  antialias: !(isTouch && window.devicePixelRatio > 1.5),
+  powerPreference: 'high-performance',
+});
+renderer.setPixelRatio(MAX_PIXEL_RATIO);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 document.getElementById('app').appendChild(renderer.domElement);
@@ -32,7 +40,38 @@ const player = { x: 0, z: 2.6, vx: 0, vz: 0, bob: 0 };
 camera.position.set(player.x, EYE, player.z);
 scene.add(camera);
 
-const look = { yaw: 0, pitch: -0.18 };
+// Input moves the target angles; the camera eases toward them each frame.
+const look = { yaw: 0, pitch: -0.18, targetYaw: 0, targetPitch: -0.18 };
+
+function turnView(dYaw, dPitch) {
+  look.targetYaw += dYaw;
+  look.targetPitch = THREE.MathUtils.clamp(look.targetPitch + dPitch, -0.85, 0.35);
+}
+
+let pixelRatio = MAX_PIXEL_RATIO;
+let pixelRatioCeiling = MAX_PIXEL_RATIO;
+const framePerf = { frames: 0, time: 0 };
+function adaptResolution(rawDt) {
+  if (rawDt > 0.25) return; // tab was hidden; ignore
+  framePerf.frames++;
+  framePerf.time += rawDt;
+  if (framePerf.time < 2) return;
+  const avg = framePerf.time / framePerf.frames;
+  framePerf.frames = 0;
+  framePerf.time = 0;
+  let next = pixelRatio;
+  if (avg > 1 / 45) {
+    next = Math.max(MIN_PIXEL_RATIO, pixelRatio - 0.25);
+    pixelRatioCeiling = next; // don't climb back to a resolution that was too slow
+  } else if (avg < 1 / 57) {
+    next = Math.min(pixelRatioCeiling, pixelRatio + 0.25);
+  }
+  if (next !== pixelRatio) {
+    pixelRatio = next;
+    renderer.setPixelRatio(next);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+}
 
 function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -47,13 +86,14 @@ onResize();
 // ---------------------------------------------------------------------------
 // Lights
 // ---------------------------------------------------------------------------
-scene.add(new THREE.HemisphereLight(0x8890b0, 0x201814, 0.55));
+// Few lights on purpose: each one adds work to every pixel on screen.
+scene.add(new THREE.HemisphereLight(0x8890b0, 0x201814, 0.85));
 
 const spot = new THREE.SpotLight(0xfff1dc, 60, 12, Math.PI / 4.2, 0.45, 1.6);
 spot.position.set(0.4, 4.2, 1.4);
 spot.target.position.set(0, 0.6, -0.9);
 spot.castShadow = true;
-spot.shadow.mapSize.set(1024, 1024);
+spot.shadow.mapSize.set(isTouch ? 512 : 1024, isTouch ? 512 : 1024);
 spot.shadow.bias = -0.0004;
 scene.add(spot, spot.target);
 
@@ -67,18 +107,6 @@ const neonLight = new THREE.PointLight(0xff2d6f, 6, 6, 1.5);
 neonLight.position.set(0, 2.4, -2.4);
 scene.add(neonLight);
 
-const sideLight = new THREE.PointLight(0x2f7bff, 4, 7, 1.5);
-sideLight.position.set(-3, 2.2, 0.5);
-scene.add(sideLight);
-
-const bedLamp = new THREE.PointLight(0xffc27a, 4, 6, 1.5);
-bedLamp.position.set(13.6, 2.4, 3.6);
-scene.add(bedLamp);
-
-const garageGlow = new THREE.PointLight(0xff8a3d, 5, 9, 1.5);
-garageGlow.position.set(14, 2.6, 3);
-scene.add(garageGlow);
-
 // Re-used flash light for impacts (kept in the scene to avoid shader recompiles).
 const flash = new THREE.PointLight(0xffd29a, 0, 3, 2);
 scene.add(flash);
@@ -91,7 +119,7 @@ world.broadphase = new CANNON.NaiveBroadphase();
 world.allowSleep = true;
 world.defaultContactMaterial.friction = 0.45;
 world.defaultContactMaterial.restitution = 0.15;
-world.solver.iterations = 8;
+world.solver.iterations = 7;
 
 const staticMeshes = [];
 
@@ -188,7 +216,7 @@ const obstacles = [
 ];
 
 // The player's body pushes bottles and shards around when walking into them.
-const playerBody = new CANNON.Body({ type: CANNON.Body.KINEMATIC, shape: new CANNON.Cylinder(PLAYER_R, PLAYER_R, 1.7, 10) });
+const playerBody = new CANNON.Body({ type: CANNON.Body.KINEMATIC, shape: new CANNON.Box(new CANNON.Vec3(PLAYER_R, 0.85, PLAYER_R)) });
 playerBody.isPlayer = true;
 playerBody.position.set(player.x, 0.85, player.z);
 world.addBody(playerBody);
@@ -225,7 +253,7 @@ function resolvePlayer() {
 const entities = [];
 const shards = [];
 const pendingBreaks = new Set();
-const MAX_SHARDS = 220;
+const MAX_SHARDS = 160;
 let smashed = 0;
 
 function countSmash() {
@@ -244,8 +272,8 @@ function spawn(typeName, x, baseY, z, rotY = Math.random() * Math.PI * 2, tilt =
   body.ent = ent;
   body.position.set(x, baseY + type.h / 2 + 0.003, z);
   body.quaternion.setFromEuler(tilt, rotY, 0, 'YXZ');
-  body.sleepSpeedLimit = 0.15;
-  body.sleepTimeLimit = 0.6;
+  body.sleepSpeedLimit = 0.25; // settle quickly so resting things cost nothing
+  body.sleepTimeLimit = 0.4;
   body.linearDamping = 0.05;
   body.angularDamping = 0.1;
   body.addEventListener('collide', (e) => {
@@ -259,14 +287,18 @@ function spawn(typeName, x, baseY, z, rotY = Math.random() * Math.PI * 2, tilt =
   ent.body = body;
   scene.add(mesh);
   world.addBody(body);
+  body.interpolatedPosition.copy(body.position);
+  body.interpolatedQuaternion.copy(body.quaternion);
   syncEnt(ent);
   entities.push(ent);
   return ent;
 }
 
-function syncEnt(e) {
-  e.mesh.position.copy(e.body.position);
-  e.mesh.quaternion.copy(e.body.quaternion);
+// Meshes follow the physics engine's interpolated pose, so motion stays
+// smooth on 90/120 Hz screens where frames fall between physics steps.
+function syncEnt(e, interpolate = true) {
+  e.mesh.position.copy(interpolate ? e.body.interpolatedPosition : e.body.position);
+  e.mesh.quaternion.copy(interpolate ? e.body.interpolatedQuaternion : e.body.quaternion);
 }
 
 function removeEnt(ent) {
@@ -557,8 +589,7 @@ const boxChunk = new THREE.BoxGeometry(1, 1, 1);
 function addShard(geo, mat, pos, scale, vel) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.scale.copy(scale);
-  mesh.castShadow = true;
-  scene.add(mesh);
+  scene.add(mesh); // shards don't cast shadows: dozens of tiny casters are costly
   const body = new CANNON.Body({
     mass: Math.max(0.01, scale.x * scale.y * scale.z * 40),
     shape: new CANNON.Box(new CANNON.Vec3(scale.x * 0.55, scale.y * 0.55, scale.z * 0.55)),
@@ -569,9 +600,13 @@ function addShard(geo, mat, pos, scale, vel) {
   body.velocity.set(vel.x, vel.y, vel.z);
   body.angularVelocity.set(rand(-15, 15), rand(-15, 15), rand(-15, 15));
   body.linearDamping = 0.1;
-  body.sleepSpeedLimit = 0.25;
-  body.sleepTimeLimit = 0.4;
+  body.sleepSpeedLimit = 0.35;
+  body.sleepTimeLimit = 0.3;
+  body.interpolatedPosition.copy(body.position);
+  body.interpolatedQuaternion.copy(body.quaternion);
   world.addBody(body);
+  mesh.position.copy(body.position);
+  mesh.quaternion.copy(body.quaternion);
   shards.push({ mesh, body });
   trimShards();
   return mesh;
@@ -752,10 +787,10 @@ function flashAt(p, intensity) {
 // Weapons: bat, fists, knife, and bare hands for grabbing
 // ---------------------------------------------------------------------------
 const WEAPONS = {
-  bat: { reach: 1.7, damage: 2, push: 1 },
-  fists: { reach: 1.25, damage: 1, push: 0.45 },
-  knife: { reach: 1.3, damage: 1, push: 0.15 },
-  grab: { reach: 1.6, damage: 0, push: 0 },
+  bat: { reach: 2.0, damage: 2, push: 1 },
+  fists: { reach: 1.4, damage: 1, push: 0.45 },
+  knife: { reach: 1.5, damage: 1, push: 0.15 },
+  grab: { reach: 1.8, damage: 0, push: 0 },
 };
 
 // Soft things and tyres shrug off blunt hits; only a blade gets through.
@@ -1158,28 +1193,48 @@ function haptic(kind) {
 const canvas = renderer.domElement;
 const drag = { id: null, x: 0, y: 0, sx: 0, sy: 0, moved: false };
 
+// On a computer, clicking locks the mouse for proper first-person aiming:
+// moving the mouse turns, clicking hits whatever is under the crosshair.
+const mouseLocked = () => document.pointerLockElement === canvas;
+const CENTER = new THREE.Vector2(0, 0);
+document.addEventListener('pointerlockchange', () => {
+  document.body.classList.toggle('locked', mouseLocked());
+});
+document.addEventListener('pointerlockerror', () => { /* not allowed here: drag-to-look still works */ });
+document.addEventListener('mousemove', (e) => {
+  // Some browsers report one huge jump right after locking; ignore spikes
+  if (!mouseLocked() || Math.abs(e.movementX) > 250 || Math.abs(e.movementY) > 250) return;
+  turnView(-e.movementX * 0.0022, -e.movementY * 0.0022);
+});
+
 canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
+  if (mouseLocked()) { act(CENTER); return; }
+  if (!isTouch && e.pointerType === 'mouse' && canvas.requestPointerLock) {
+    try {
+      const req = canvas.requestPointerLock();
+      if (req && req.catch) req.catch(() => {});
+    } catch (_) { /* fall back to drag-to-look */ }
+  }
   if (drag.id !== null) return;
   drag.id = e.pointerId;
   drag.x = drag.sx = e.clientX;
   drag.y = drag.sy = e.clientY;
   drag.moved = false;
-  canvas.setPointerCapture(e.pointerId);
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* refused while the mouse is being locked */ }
 });
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerId !== drag.id) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 10) drag.moved = true;
   if (drag.moved) {
-    const k = 1.6 / Math.min(window.innerWidth, window.innerHeight);
-    look.yaw -= dx * k;
-    look.pitch = THREE.MathUtils.clamp(look.pitch - dy * k, -0.85, 0.35);
+    const k = 1.5 / Math.min(window.innerWidth, window.innerHeight);
+    turnView(-dx * k, -dy * k);
   }
   drag.x = e.clientX; drag.y = e.clientY;
 });
 const endPointer = (e) => {
-  if (e.pointerId !== drag.id) return;
+  if (e.pointerId !== drag.id || mouseLocked()) { if (e.pointerId === drag.id) drag.id = null; return; }
   drag.id = null;
   if (!drag.moved && e.type === 'pointerup') {
     const r = canvas.getBoundingClientRect();
@@ -1232,16 +1287,23 @@ for (const b of document.querySelectorAll('#modes button')) {
   b.addEventListener('click', () => { unlockAudio(); setMode(b.dataset.mode); });
 }
 
-const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (isTouch) document.body.classList.add('touch');
 if (new URLSearchParams(location.search).has('app')) document.body.classList.add('in-app');
 document.getElementById('hint').textContent = isTouch
   ? 'Joystick to walk · Drag to look · Tap to hit'
-  : 'WASD to walk · Drag to look · Click to hit · 1-4 to switch';
+  : 'Click to lock the mouse · WASD to walk · 1-4 to switch · Esc to unlock';
 
-const WALK_SPEED = 2.2;
+const WALK_SPEED = 2.6;
+const JOY_DEAD = 0.15;
 function updatePlayer(dt) {
-  let fwd = -joy.y, side = joy.x;
+  // Dead zone, then a gentle curve so small pushes give slow, precise steps
+  let jx = joy.x, jy = joy.y;
+  const jm = Math.hypot(jx, jy);
+  if (jm < JOY_DEAD) { jx = 0; jy = 0; } else {
+    const k = Math.pow((jm - JOY_DEAD) / (1 - JOY_DEAD), 1.5) / jm;
+    jx *= k; jy *= k;
+  }
+  let fwd = -jy, side = jx;
   if (keys.has('KeyW') || keys.has('ArrowUp')) fwd += 1;
   if (keys.has('KeyS') || keys.has('ArrowDown')) fwd -= 1;
   if (keys.has('KeyA') || keys.has('ArrowLeft')) side -= 1;
@@ -1301,12 +1363,19 @@ let screenTick = 0;
 const clock = new THREE.Clock();
 
 function frame() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
+  adaptResolution(rawDt);
+
+  // Ease the view toward where the player is pointing it
+  const ease = 1 - Math.exp(-dt * 30);
+  look.yaw += (look.targetYaw - look.yaw) * ease;
+  look.pitch += (look.targetPitch - look.pitch) * ease;
 
   updatePlayer(dt);
   slowMo = Math.max(0, slowMo - dt);
   const timeScale = slowMo > 0 ? 0.3 + 0.7 * (1 - slowMo / 0.55) ** 3 : 1;
-  world.step(1 / 60, dt * timeScale, 4);
+  world.step(1 / 60, dt * timeScale, 2); // at most 2 catch-up steps, so a slow frame can't snowball
 
   for (const ent of pendingBreaks) {
     const v = ent.body.velocity;
@@ -1320,8 +1389,9 @@ function frame() {
     if (e.body.position.y < -2) removeEnt(e);
   }
   for (const s of shards) {
-    s.mesh.position.copy(s.body.position);
-    s.mesh.quaternion.copy(s.body.quaternion);
+    if (s.body.sleepState === CANNON.Body.SLEEPING) continue;
+    s.mesh.position.copy(s.body.interpolatedPosition);
+    s.mesh.quaternion.copy(s.body.interpolatedQuaternion);
   }
 
   // Damaged screens flicker; alarmed cars flash their lights
@@ -1346,14 +1416,14 @@ function frame() {
   flash.intensity *= Math.pow(0.002, dt);
 
   camera.rotation.set(look.pitch, look.yaw, 0);
-  camera.position.set(player.x, EYE + Math.sin(player.bob) * 0.025, player.z);
+  camera.position.set(player.x, EYE + Math.sin(player.bob) * 0.012, player.z);
   if (shake > 0.0005) {
-    camera.position.x += rand(-1, 1) * shake;
-    camera.position.y += rand(-1, 1) * shake;
+    camera.position.x += rand(-1, 1) * shake * 0.7;
+    camera.position.y += rand(-1, 1) * shake * 0.7;
     shake *= Math.pow(0.0005, dt);
   }
   updateHeld();
-  if (held) syncEnt(held);
+  if (held) syncEnt(held, false);
 
   for (const n of neons) n.material.opacity = Math.random() < 0.015 ? 0.4 : 1;
 

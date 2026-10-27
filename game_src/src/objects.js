@@ -5,6 +5,13 @@ import { woodTexture, fabricTexture } from './textures.js';
 // Every smashable object: its look, physics body, toughness and how it breaks.
 // hp: the bat deals 2 damage per hit, fists 1.
 
+// Round things collide as boxes. Cylinders cost the physics engine many times
+// more and made the game stutter on phones.
+const roundShape = (rTop, rBottom, h) => {
+  const r = Math.max(rTop, rBottom);
+  return new CANNON.Box(new CANNON.Vec3(r, h / 2, r));
+};
+
 export const rand = (a, b) => a + Math.random() * (b - a);
 export const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
@@ -66,17 +73,17 @@ const GEOS = {
  * what it sounds like when it breaks.
  */
 export const TYPES = {
-  tumbler: { kind: 'glass', mass: 0.25, hp: 1, breakVel: 3, shards: 12, shape: () => new CANNON.Cylinder(0.044, 0.04, 0.12, 10), h: 0.12,
+  tumbler: { kind: 'glass', mass: 0.25, hp: 1, breakVel: 3, shards: 12, shape: () => roundShape(0.044, 0.04, 0.12), h: 0.12,
     build: () => new THREE.Mesh(GEOS.tumbler, MATS.glass) },
-  wine: { kind: 'glass', mass: 0.2, hp: 1, breakVel: 2.6, shards: 12, shape: () => new CANNON.Cylinder(0.038, 0.035, 0.21, 10), h: 0.21,
+  wine: { kind: 'glass', mass: 0.2, hp: 1, breakVel: 2.6, shards: 12, shape: () => roundShape(0.038, 0.035, 0.21), h: 0.21,
     build: () => new THREE.Mesh(GEOS.wine, MATS.glass) },
-  bottle: { kind: 'glass', mass: 0.5, hp: 1, breakVel: 3.6, shards: 14, shape: () => new CANNON.Cylinder(0.03, 0.038, 0.335, 10), h: 0.335,
+  bottle: { kind: 'glass', mass: 0.5, hp: 1, breakVel: 3.6, shards: 14, shape: () => roundShape(0.03, 0.038, 0.335), h: 0.335,
     build: () => new THREE.Mesh(GEOS.bottle, Math.random() < 0.5 ? MATS.green : MATS.brown) },
-  vase: { kind: 'ceramic', mass: 0.9, hp: 1, breakVel: 3.6, shards: 14, shape: () => new CANNON.Cylinder(0.08, 0.09, 0.36, 10), h: 0.36,
+  vase: { kind: 'ceramic', mass: 0.9, hp: 1, breakVel: 3.6, shards: 14, shape: () => roundShape(0.08, 0.09, 0.36), h: 0.36,
     build: () => new THREE.Mesh(GEOS.vase, ceramicMat(pick(VASE_COLORS))) },
-  plate: { kind: 'ceramic', mass: 0.3, hp: 1, breakVel: 3.4, shards: 10, shape: () => new CANNON.Cylinder(0.13, 0.095, 0.022, 12), h: 0.022,
+  plate: { kind: 'ceramic', mass: 0.3, hp: 1, breakVel: 3.4, shards: 10, shape: () => roundShape(0.13, 0.095, 0.022), h: 0.022,
     build: () => new THREE.Mesh(GEOS.plate, MATS.plate) },
-  mug: { kind: 'ceramic', mass: 0.35, hp: 1, breakVel: 3.8, shards: 10, shape: () => new CANNON.Cylinder(0.045, 0.042, 0.1, 10), h: 0.1,
+  mug: { kind: 'ceramic', mass: 0.35, hp: 1, breakVel: 3.8, shards: 10, shape: () => roundShape(0.045, 0.042, 0.1), h: 0.1,
     build: () => {
       const mat = ceramicMat(pick(MUG_COLORS));
       const g = new THREE.Group();
@@ -125,7 +132,7 @@ export const TYPES = {
       return b;
     } },
   // --- Workbench and room clutter -------------------------------------------
-  lamp: { kind: 'glass', mass: 1.2, hp: 1, breakVel: 3.2, shards: 14, shape: () => new CANNON.Cylinder(0.12, 0.08, 0.5, 10), h: 0.5,
+  lamp: { kind: 'glass', mass: 1.2, hp: 1, breakVel: 3.2, shards: 14, shape: () => roundShape(0.12, 0.08, 0.5), h: 0.5,
     build: () => {
       const g = new THREE.Group();
       const base = new THREE.Mesh(lathe([[0, 0], [0.08, 0], [0.08, 0.03], [0.03, 0.06], [0.015, 0.08], [0, 0.08]], 18, 0.08), ceramicMat(0x2b2b30));
@@ -139,7 +146,7 @@ export const TYPES = {
       g.add(base, stem, bulb, shade);
       return g;
     } },
-  jar: { kind: 'glass', mass: 0.5, hp: 1, breakVel: 3.2, shards: 12, shape: () => new CANNON.Cylinder(0.06, 0.06, 0.21, 10), h: 0.21,
+  jar: { kind: 'glass', mass: 0.5, hp: 1, breakVel: 3.2, shards: 12, shape: () => roundShape(0.06, 0.06, 0.21), h: 0.21,
     build: () => {
       const g = new THREE.Group();
       const jar = new THREE.Mesh(lathe([[0, 0], [0.055, 0], [0.06, 0.01], [0.06, 0.15], [0.045, 0.17], [0.045, 0.19], [0, 0.19]], 18, 0.19), MATS.glass);
@@ -149,7 +156,7 @@ export const TYPES = {
       g.add(jar, lid);
       return g;
     } },
-  teapot: { kind: 'ceramic', mass: 0.8, hp: 1, breakVel: 3.6, shards: 12, shape: () => new CANNON.Cylinder(0.09, 0.09, 0.16, 10), h: 0.16,
+  teapot: { kind: 'ceramic', mass: 0.8, hp: 1, breakVel: 3.6, shards: 12, shape: () => roundShape(0.09, 0.09, 0.16), h: 0.16,
     build: () => {
       const mat = ceramicMat(pick([0xffffff, 0x3b6fb6, 0xe8d9b5]));
       const g = new THREE.Group();
@@ -183,7 +190,7 @@ export const TYPES = {
     },
     body: () => {
       const b = new CANNON.Body({ mass: 2.5 });
-      b.addShape(new CANNON.Cylinder(0.11, 0.07, 0.22, 10), new CANNON.Vec3(0, -0.09, 0));
+      b.addShape(roundShape(0.11, 0.07, 0.22), new CANNON.Vec3(0, -0.09, 0));
       return b;
     } },
   laptop: { kind: 'tv', mass: 2, hp: 3, breakVel: 5, shards: 12, h: 0.02,
@@ -282,7 +289,7 @@ export const TYPES = {
     } },
   cushion: { kind: 'soft', stuffing: 'foam', mass: 1.5, hp: 2, breakVel: 99, shards: 6, shape: () => new CANNON.Box(new CANNON.Vec3(0.26, 0.07, 0.3)), h: 0.14,
     build: () => new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.14, 0.6, 4, 2, 4), MATS.cushion) },
-  teddy: { kind: 'soft', stuffing: 'foam', mass: 0.5, hp: 2, breakVel: 99, shards: 6, shape: () => new CANNON.Cylinder(0.12, 0.12, 0.42, 10), h: 0.42,
+  teddy: { kind: 'soft', stuffing: 'foam', mass: 0.5, hp: 2, breakVel: 99, shards: 6, shape: () => roundShape(0.12, 0.12, 0.42), h: 0.42,
     build: () => {
       const g = new THREE.Group();
       const ball = (r, mat, x, y, z, sy = 1) => {
@@ -338,7 +345,7 @@ export const TYPES = {
       return b;
     } },
   // A spare tyre: bounces off bats, goes flat when stabbed
-  tyre: { kind: 'rubber', mass: 9, hp: 1, breakVel: 99, shards: 0, shape: () => new CANNON.Cylinder(0.35, 0.35, 0.18, 14), h: 0.18,
+  tyre: { kind: 'rubber', mass: 9, hp: 1, breakVel: 99, shards: 0, shape: () => roundShape(0.35, 0.35, 0.18), h: 0.18,
     build: () => {
       const g = new THREE.Group();
       const torus = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.09, 12, 28), MATS.rubber);

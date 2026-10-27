@@ -4,16 +4,16 @@ A 3D virtual rage room with a garage. Walk around, then smash glasses, bottles, 
 
 **Controls**
 - **Walk:** joystick (phone) or WASD / arrow keys (computer)
-- **Look around:** drag on the screen
+- **Look around:** drag on the screen (phone); on a computer, click once to lock the mouse, then move it to look and click to hit what's under the crosshair (Esc unlocks)
 - **Hit / grab / throw:** tap (or click, or Space)
 - **Switch mode:** the Bat / Fists / Knife / Grab buttons, or keys 1 / 2 / 3 / 4 (Q cycles)
 - **Refill** brings everything back; 🔊 toggles sound
 
 **Modes**
-- **Bat**: 1.7 m reach, 2 damage per hit
-- **Fists**: 1.25 m reach, 1 damage per punch, left and right in turn
-- **Knife**: 1.3 m reach. The only thing that rips soft stuff: pillows burst into feathers, the mattress, sofa, cushions and teddy spill foam and tear apart, tyres (spare ones and the vehicles') hiss and go flat, and car paint gets scratched. Every stab leaves a cut mark.
-- **Grab**: pick up anything up to 15 kg, carry it, tap again to throw it. Thrown things break on impact, and can break vehicle windows.
+- **Bat**: 2 m reach, 2 damage per hit
+- **Fists**: 1.4 m reach, 1 damage per punch, left and right in turn
+- **Knife**: 1.5 m reach. The only thing that rips soft stuff: pillows burst into feathers, the mattress, sofa, cushions and teddy spill foam and tear apart, tyres (spare ones and the vehicles') hiss and go flat, and car paint gets scratched. Every stab leaves a cut mark.
+- **Grab**: 1.8 m reach; pick up anything up to 15 kg, carry it, tap again to throw it. Thrown things break on impact, and can break vehicle windows.
 
 You have to walk up to things (reach is measured along the floor, so you can bend down to tyres): anything further than your reach shows "Too far — walk closer".
 

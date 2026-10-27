@@ -39,6 +39,10 @@
     background: rgba(20,16,24,.75); padding: 10px 18px; border-radius: 999px; font-size: 14px; white-space: nowrap;
     pointer-events: none; transition: opacity .6s; }
   #hint.gone { opacity: 0; }
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.85); box-shadow: 0 0 4px rgba(0,0,0,.6); pointer-events: none; display: none; }
+  body.locked #crosshair { display: block; }
+  body.locked #modes, body.locked #buttons { opacity: .55; }
   #cleared { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 14px; background: rgba(12,10,15,.55); text-align: center; padding: 16px; }
   #cleared[hidden] { display: none; }
@@ -60,6 +64,7 @@
 </div>
 <div id="joy" aria-label="Walk joystick"><div id="knob"></div></div>
 <div id="toast" role="status"></div>
+<div id="crosshair"></div>
 <div id="cleared" hidden>
   <h2>Room cleared 😤</h2>
   <p>Feeling better?</p>

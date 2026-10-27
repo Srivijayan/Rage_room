@@ -18,6 +18,7 @@ const template = fs.readFileSync(path.join(here, 'src/index.html'), 'utf8');
 const html = template.replace('/*GAME_JS*/', () => js);
 
 // Artifact version: the host adds its own doctype/head/body wrapper.
+fs.mkdirSync(path.join(here, 'dist'), { recursive: true });
 const head = html.match(/<head>([\s\S]*?)<\/head>/)[1].replace(/<meta[^>]*>\s*/g, '');
 const body = html.match(/<body>([\s\S]*)<\/body>/)[1];
 fs.writeFileSync(path.join(here, 'dist/artifact.html'), head.trim() + '\n' + body.trim() + '\n');
