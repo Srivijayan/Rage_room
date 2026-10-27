@@ -1,6 +1,12 @@
 # Rage Room
 
-A 3D virtual rage room with a garage. Walk around, then smash glasses, bottles, plates, mugs, vases, jars, a teapot, plants, a lamp, a laptop, a printer, a CRT TV, a monitor, chairs, crates, a standing mirror, a bed with pillows and a teddy, a sofa, spare tyres, a car and a city bus. Runs on the web, Android and iOS from one Flutter project.
+A 3D smash-everything game in four levels. Runs on the web, Android and iOS from one Flutter project.
+
+**Levels** (open the 🗺 Map to switch; smash 80% of a level to unlock the next, progress is saved on the device)
+1. **Rage Room**: glasses, bottles, plates, vases, a TV, a monitor, a shelf, a workbench with a laptop, printer, lamp, teapot, jars and plants, chairs, crates and a standing mirror
+2. **Garage**: a car and a city bus (walk inside and smash the seats), a bed with pillows and a teddy, a sofa, spare tyres
+3. **Office**: desks with monitors, keyboards, laptops and mugs, office chairs, filing cabinets, glass walls around the manager's corner, a water cooler, a whiteboard, plants
+4. **Kitchen**: counters with a microwave, toaster, jars, plates and mugs, a fridge, a kitchen island, a dining table with chairs
 
 **Controls**
 - **Walk:** joystick (phone) or WASD / arrow keys (computer)
@@ -8,7 +14,7 @@ A 3D virtual rage room with a garage. Walk around, then smash glasses, bottles, 
 - **Zoom:** pinch with two fingers (phone), mouse wheel (computer), the + / − buttons, or the + / − keys
 - **Hit / grab / throw:** tap (or click, or Space)
 - **Switch mode:** the Bat / Fists / Knife / Grab buttons, or keys 1 / 2 / 3 / 4 (Q cycles)
-- **Refill** brings everything back; 🔊 toggles sound
+- **Refill** restarts the level; **Map** (or M) shows the levels; 🔊 toggles sound
 
 **Modes**
 - **Bat**: 2 m reach, 2 damage per hit
@@ -34,7 +40,8 @@ rage_room/
 │   ├── lib/game_view_web.dart     Runs the game in an iframe (web)
 │   └── assets/game/index.html     The built 3D game (generated, don't edit)
 └── game_src/     The 3D game itself (JavaScript)
-    ├── src/main.js      Building, walking, weapons, physics, smashing
+    ├── src/levels.js    The four levels: rooms, furniture, objects, lighting
+    ├── src/main.js      Walking, weapons, physics, smashing, level progress
     ├── src/objects.js   Every smashable object (look, physics, toughness)
     ├── src/vehicles.js  The car and the bus, built from breakable parts
     ├── src/audio.js     All sounds (synthesized, no audio files)
@@ -98,4 +105,4 @@ node build.mjs     # writes app/assets/game/index.html and dist/index.html
 
 Open `game_src/dist/index.html` in a browser to try changes without Flutter.
 
-Ideas: add objects to `TYPES` in `objects.js` and place them in `layoutRoom()` in `main.js`; add vehicles in `vehicles.js` and `VEHICLE_SPOTS` in `main.js`; change the neon signs in the `neonSign(...)` calls.
+Ideas: add objects to `TYPES` in `objects.js` and place them in a level's `items` in `levels.js`; add a level to `LEVELS` (and its room to `SHELLS`); change `UNLOCK_AT` to make unlocking harder or easier; add vehicles in `vehicles.js` and `VEHICLE_SPOTS` in `main.js`; change the neon signs in the `neonSign(...)` calls.

@@ -49,6 +49,16 @@ export const MATS = {
   furLight: new THREE.MeshStandardMaterial({ color: 0xd7b48a, roughness: 1 }),
   foam: new THREE.MeshStandardMaterial({ color: 0xf2dc8a, roughness: 1 }),
   rubber: new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.9 }),
+  metalDark: new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.5, metalness: 0.7 }),
+  steel: new THREE.MeshStandardMaterial({ color: 0x8d949c, roughness: 0.35, metalness: 0.8 }),
+  chrome: new THREE.MeshStandardMaterial({ color: 0xd8dde2, roughness: 0.15, metalness: 1 }),
+  enamel: new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.3, metalness: 0.1 }),
+  stone: new THREE.MeshStandardMaterial({ color: 0x6b6966, roughness: 0.4 }),
+  cabinet: new THREE.MeshStandardMaterial({ color: 0x2f6f6a, roughness: 0.6 }),
+  whiteboard: new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.25 }),
+  seat: new THREE.MeshStandardMaterial({ map: fabricTexture('#34509e'), roughness: 1 }),
+  waterGlass: glassMat(0x7fb8ff, 0.45),
+  darkGlass: new THREE.MeshStandardMaterial({ color: 0x111418, roughness: 0.1, metalness: 0.4 }),
 };
 const VASE_COLORS = [0x1d8a8a, 0xc8643b, 0x2a4fbf, 0xd9b44a, 0x9b2f6b];
 const MUG_COLORS = [0xe24a3b, 0xf2c94c, 0x4a90e2, 0xffffff, 0x27ae60];
@@ -354,6 +364,41 @@ export const TYPES = {
       g.add(torus);
       return g;
     } },
+  // --- Office and kitchen -----------------------------------------------------
+  keyboard: { kind: 'tv', mass: 0.8, hp: 2, breakVel: 5, shards: 6, shape: () => new CANNON.Box(new CANNON.Vec3(0.22, 0.015, 0.075)), h: 0.03,
+    build: () => {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.03, 0.15), MATS.black));
+      const keys = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.012, 0.11), MATS.lightPlastic);
+      keys.position.y = 0.018;
+      g.add(keys);
+      return g;
+    } },
+  microwave: { kind: 'tv', mass: 12, hp: 8, breakVel: 5, shards: 16, shape: () => new CANNON.Box(new CANNON.Vec3(0.25, 0.15, 0.18)), h: 0.3,
+    build: () => {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.36), MATS.enamel));
+      const door = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.22), MATS.darkGlass);
+      door.position.set(-0.06, 0, 0.181);
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.22, 0.01), MATS.metalDark);
+      panel.position.set(0.18, 0, 0.18);
+      g.add(door, panel);
+      return g;
+    } },
+  toaster: { kind: 'tv', mass: 2, hp: 4, breakVel: 5, shards: 8, shape: () => new CANNON.Box(new CANNON.Vec3(0.14, 0.1, 0.08)), h: 0.2,
+    build: () => {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.2, 0.16), MATS.chrome));
+      for (const z of [-0.035, 0.035]) {
+        const slot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.01, 0.03), MATS.black);
+        slot.position.set(0, 0.1, z);
+        g.add(slot);
+      }
+      return g;
+    } },
+  // Big blue bottle on top of the office water cooler
+  jug: { kind: 'glass', mass: 3, hp: 1, breakVel: 3, shards: 20, shape: () => roundShape(0.14, 0.14, 0.48), h: 0.48,
+    build: () => new THREE.Mesh(lathe([[0, 0], [0.03, 0], [0.035, 0.08], [0.13, 0.13], [0.14, 0.2], [0.14, 0.44], [0.12, 0.48], [0, 0.48]], 22, 0.48), MATS.waterGlass) },
 };
 
 

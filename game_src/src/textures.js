@@ -169,3 +169,28 @@ export function fabricTexture(color, quilt = false) {
   t.repeat.set(quilt ? 3 : 1, quilt ? 2 : 1);
   return t;
 }
+
+// Square tiles with grout lines; `checker` alternates two colours (kitchen floor).
+export function tileTexture(color, grout, repeat, checker = null) {
+  return canvasTexture(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = grout; ctx.fillRect(0, 0, w, h);
+    const n = 4, s = w / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      ctx.fillStyle = checker && (i + j) % 2 ? checker : color;
+      ctx.fillRect(i * s + 2, j * s + 2, s - 4, s - 4);
+      ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.08})`;
+      ctx.fillRect(i * s + 2, j * s + 2, s - 4, (s - 4) / 2);
+    }
+  }, repeat[0], repeat[1]);
+}
+
+// Painted plaster with faint blotches (office walls).
+export function plasterTexture(color, repeat) {
+  return canvasTexture(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = color; ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 2500; i++) {
+      ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.03})`;
+      ctx.fillRect(Math.random() * w, Math.random() * h, 3, 3);
+    }
+  }, repeat[0], repeat[1]);
+}

@@ -13,7 +13,12 @@
   #hud { position: fixed; top: calc(env(safe-area-inset-top) + 14px); left: 16px; pointer-events: none; }
   .title { font-weight: 900; font-size: 22px; letter-spacing: 2px; }
   .title span { color: var(--pink); text-shadow: 0 0 12px var(--pink); }
-  #count { font-size: 14px; opacity: .8; margin-top: 2px; }
+  #level-name { font-size: 13px; font-weight: 700; margin-top: 4px; letter-spacing: .3px; }
+  @media (max-width: 520px) { #buttons .label { display: none; } }
+  #bar { width: 130px; height: 6px; margin-top: 5px; border-radius: 3px; background: rgba(255,255,255,.18); overflow: hidden; }
+  #bar-fill { display: block; height: 100%; width: 0; background: var(--pink); transition: width .3s; }
+  #bar.done #bar-fill { background: #3ddc84; }
+  #count { font-size: 12px; opacity: .8; margin-top: 3px; font-variant-numeric: tabular-nums; }
   #buttons { position: fixed; top: calc(env(safe-area-inset-top) + 12px); right: 16px; display: flex; gap: 8px; }
   button { font: inherit; font-weight: 700; color: var(--ink); background: rgba(20,16,24,.7);
     border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 9px 14px; cursor: pointer;
@@ -38,7 +43,7 @@
     display: flex; flex-direction: column; gap: 8px; }
   #zoom button { width: 44px; height: 44px; padding: 0; font-size: 22px; line-height: 1; margin-left: 28px; }
   #modes button.on { background: var(--pink); border-color: var(--pink); box-shadow: 0 0 16px rgba(255,45,111,.55); }
-  #hint { position: fixed; top: calc(env(safe-area-inset-top) + 68px); left: 50%; transform: translateX(-50%);
+  #hint { position: fixed; top: calc(env(safe-area-inset-top) + 112px); left: 50%; transform: translateX(-50%);
     background: rgba(20,16,24,.75); padding: 10px 18px; border-radius: 999px; font-size: 14px; white-space: nowrap;
     pointer-events: none; transition: opacity .6s; }
   #hint.gone { opacity: 0; }
@@ -49,15 +54,37 @@
   #cleared { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 14px; background: rgba(12,10,15,.55); text-align: center; padding: 16px; }
   #cleared[hidden] { display: none; }
-  #cleared h2 { margin: 0; font-size: 30px; font-weight: 900; }
+  #cleared h2 { margin: 0; font-size: 30px; font-weight: 900; text-wrap: balance; }
   #cleared p { margin: 0; opacity: .8; }
-  #refill { background: var(--pink); border-color: var(--pink); padding: 12px 22px; font-size: 16px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .primary { background: var(--pink); border-color: var(--pink); padding: 12px 22px; font-size: 16px; }
+  /* Level map, styled like a bus route board */
+  #map { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: rgba(12,10,15,.82); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  #map[hidden] { display: none; }
+  .board { width: min(440px, 100%); background: #17131c; border: 1px solid rgba(255,255,255,.12); border-radius: 18px; padding: 20px 18px; }
+  .board h2 { margin: 0 0 2px; font-size: 22px; font-weight: 900; letter-spacing: 1px; }
+  .board h2 span { color: var(--pink); }
+  .board .sub { margin: 0 0 14px; font-size: 13px; opacity: .65; }
+  #map-list { display: flex; flex-direction: column; position: relative; }
+  #map-list::before { content: ""; position: absolute; left: 21px; top: 22px; bottom: 22px; width: 4px; border-radius: 2px; background: var(--pink); opacity: .5; }
+  .stop { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border-radius: 12px; padding: 10px 8px;
+    background: transparent; border: 1px solid transparent; backdrop-filter: none; -webkit-backdrop-filter: none; position: relative; }
+  .stop:not(.locked):hover, .stop.here { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12); }
+  .stop .dot { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 14px;
+    background: var(--pink); color: #fff; box-shadow: 0 0 0 4px #17131c; }
+  .stop.locked { opacity: .55; cursor: not-allowed; }
+  .stop.locked .dot { background: #3a3440; }
+  .stop .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+  .stop small { font-weight: 400; opacity: .7; font-size: 12px; }
+  .stop .best { font-size: 13px; opacity: .8; font-variant-numeric: tabular-nums; }
+  #map-close { margin-top: 12px; width: 100%; }
 </style>
 </head>
 <body>
 <div id="app"></div>
-<div id="hud"><div class="title">RAGE <span>ROOM</span></div><div id="count">0 smashed</div></div>
-<div id="buttons"><button id="mute" aria-label="Sound on or off">🔊</button><button id="reset">↻ Refill</button></div>
+<div id="hud"><div class="title">RAGE <span>ROOM</span></div><div id="level-name">Level 1</div><div id="bar"><span id="bar-fill"></span></div><div id="count">0 smashed · 0%</div></div>
+<div id="buttons"><button id="mute" aria-label="Sound on or off">🔊</button><button id="map-btn" aria-label="Map">🗺<span class="label"> Map</span></button><button id="reset" aria-label="Refill">↻<span class="label"> Refill</span></button></div>
 <div id="hint">Tap to swing · Drag to look around</div>
 <div id="zoom" role="group" aria-label="Zoom">
   <button id="zoom-in" aria-label="Zoom in">+</button>
@@ -73,9 +100,24 @@
 <div id="toast" role="status"></div>
 <div id="crosshair"></div>
 <div id="cleared" hidden>
-  <h2>Room cleared 😤</h2>
-  <p>Feeling better?</p>
-  <button id="refill">Bring more stuff</button>
+  <h2 id="clear-title">Level complete</h2>
+  <p id="clear-text"></p>
+  <div class="row">
+    <button id="next" class="primary">Next level →</button>
+    <button id="keep">Keep smashing</button>
+  </div>
+  <div class="row">
+    <button id="open-map">🗺 Map</button>
+    <button id="refill">↻ Play again</button>
+  </div>
+</div>
+<div id="map" hidden>
+  <div class="board">
+    <h2>ROUTE <span>MAP</span></h2>
+    <p class="sub">Smash 80% of a level to open the next stop.</p>
+    <div id="map-list"></div>
+    <button id="map-close">Close</button>
+  </div>
 </div>
 <script>/*GAME_JS*/</script>
 </body>

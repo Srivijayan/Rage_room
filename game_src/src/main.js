@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx, unlockAudio, setMuted, isMuted } from './audio.js';
-import { brickTexture, concreteTexture, neonTexture, hazardTexture, crackedGlassTexture, fabricTexture } from './textures.js';
+import { neonTexture, crackedGlassTexture } from './textures.js';
 import { TYPES, MATS, drawScreen, crackScreen, rand, pick } from './objects.js';
 import { buildCar, buildBus } from './vehicles.js';
+import { LEVELS, SHELLS, UNLOCK_AT, BUS_X, BUS_Z } from './levels.js';
 
 // ---------------------------------------------------------------------------
 // Renderer, scene, camera
@@ -138,7 +139,7 @@ world.solver.iterations = 7;
 
 const staticMeshes = [];
 
-function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0 } = {}) {
+function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0, parent = scene } = {}) {
   let mesh = null;
   if (visible) {
     mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -146,7 +147,7 @@ function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0 } = {}
     mesh.rotation.y = rotY;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    scene.add(mesh);
+    parent.add(mesh);
     staticMeshes.push(mesh);
   }
   const body = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, d / 2)) });
@@ -158,91 +159,45 @@ function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0 } = {}
 }
 
 // ---------------------------------------------------------------------------
-// The building: the rage room on the left, a garage on the right
+// The rooms. Each level's shell is built once and shown only while it is played.
 // ---------------------------------------------------------------------------
-const wallMat = new THREE.MeshStandardMaterial({ map: brickTexture(4, 2), roughness: 0.9 });
-const longWallMat = new THREE.MeshStandardMaterial({ map: brickTexture(9, 2), roughness: 0.9 });
-const floorMat = new THREE.MeshStandardMaterial({ map: concreteTexture(6), roughness: 0.85 });
-floorMat.map.repeat.set(7, 3);
-const metalMat = new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.5, metalness: 0.7 });
-
-const ROOM = { minX: -3.5, maxX: 15.1, minZ: -2.9, maxZ: 4.9 };
-staticBox(19, 0.1, 8.5, 5.7, -0.05, 1.0, floorMat);
-staticBox(19, 4, 0.2, 5.7, 2, -3, longWallMat);
-staticBox(19, 4, 0.2, 5.7, 2, 5.0, longWallMat);
-staticBox(0.2, 4, 8.2, -3.6, 2, 1.0, wallMat);
-staticBox(0.2, 4, 8.2, 15.2, 2, 1.0, wallMat);
-
-// Hazard stripe where the garage starts
-const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 7.8), new THREE.MeshStandardMaterial({ map: hazardTexture(), roughness: 0.8 }));
-stripe.rotation.x = -Math.PI / 2;
-stripe.position.set(3.95, 0.003, 1.0);
-stripe.receiveShadow = true;
-scene.add(stripe);
-
-// Furniture stays put until it is smashed. Then it collapses into planks and
-// everything standing on it falls. Boxes are [w, h, d, x, y, z, material, rotY].
-const TABLE_TOP = 0.82;
-const SHELF_Z = -2.55;
-const SHELF_LOW = 0.92, SHELF_HIGH = 1.67;
-const BENCH_TOP = 0.9, BENCH_Z = 4.5;
-const BED_TOP = 0.3;
-const BUS_X = 9.5, BUS_Z = -1.6, BUS_FLOOR = 0.4;
-const seatMat = new THREE.MeshStandardMaterial({ map: fabricTexture('#34509e'), roughness: 1 });
-
-// Bus seats face the front (+x): pedestal, cushion and backrest. Soft: the
-// knife can slash them as well as the bat and fists.
-function busSeat(lx, lz, width = 0.8) {
-  const x = BUS_X + lx, z = BUS_Z + lz;
-  return { name: 'bus seat', hp: 8, soft: true, obstacle: { x: x - 0.02, z, w: 0.5, d: width, rot: 0 }, boxes: [
-    [0.12, 0.35, width * 0.6, x, BUS_FLOOR + 0.175, z, metalMat],
-    [0.45, 0.1, width, x, BUS_FLOOR + 0.4, z, seatMat],
-    [0.08, 0.6, width, x - 0.22, BUS_FLOOR + 0.7, z, seatMat],
-  ] };
+const neons = [];
+function neonSign(text, x, y, z, parent) {
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.4, 0.6),
+    new THREE.MeshBasicMaterial({ map: neonTexture(text), transparent: true, toneMapped: false }),
+  );
+  m.position.set(x, y, z);
+  parent.add(m);
+  neons.push(m);
 }
-const BUS_SEATS = [];
-for (let i = 0; i < 7; i++) {
-  const lx = -4.3 + i * 1.05;
-  BUS_SEATS.push(busSeat(lx, -0.78));
-  if (lx < 1.4 || lx > 3.3) BUS_SEATS.push(busSeat(lx, 0.78)); // keep the doorway clear
-}
-BUS_SEATS.push(busSeat(4.0, -0.6, 0.5)); // driver
 
-const FURNITURE = [
-  ...BUS_SEATS,
-  { name: 'table', hp: 12, obstacle: { x: 0, z: 0.05, w: 2.7, d: 1.0, rot: 0 }, boxes: [
-    [2.7, 0.08, 1.0, 0, 0.78, 0.05, MATS.wood],
-    ...[[-1.25, -0.38], [1.25, -0.38], [-1.25, 0.48], [1.25, 0.48]].map(([x, z]) => [0.08, 0.74, 0.08, x, 0.37, z, MATS.darkWood]),
-  ] },
-  { name: 'shelf', hp: 16, obstacle: { x: 0, z: SHELF_Z, w: 4.3, d: 0.5, rot: 0 }, boxes: [
-    [4.2, 0.04, 0.5, 0, SHELF_LOW - 0.02, SHELF_Z, MATS.darkWood],
-    [4.2, 0.04, 0.5, 0, SHELF_HIGH - 0.02, SHELF_Z, MATS.darkWood],
-    [0.06, 1.8, 0.5, -2.1, 0.9, SHELF_Z, metalMat],
-    [0.06, 1.8, 0.5, 2.1, 0.9, SHELF_Z, metalMat],
-  ] },
-  { name: 'tv crate', hp: 12, obstacle: { x: -2.35, z: -1.3, w: 0.9, d: 0.7, rot: 0.45 }, boxes: [
-    [0.9, 0.95, 0.7, -2.35, 0.475, -1.3, MATS.wood, 0.45],
-  ] },
-  { name: 'monitor desk', hp: 8, obstacle: { x: 2.35, z: -1.3, w: 0.9, d: 0.6, rot: -0.45 }, boxes: [
-    [0.9, 0.06, 0.6, 2.35, 0.72, -1.3, MATS.darkWood, -0.45],
-    [0.08, 0.7, 0.5, 2.35, 0.35, -1.3, metalMat, -0.45],
-  ] },
-  { name: 'workbench', hp: 16, obstacle: { x: -0.6, z: BENCH_Z, w: 4, d: 0.7, rot: 0 }, boxes: [
-    [4, 0.06, 0.7, -0.6, BENCH_TOP - 0.03, BENCH_Z, MATS.darkWood],
-    [0.08, 0.84, 0.6, -2.5, 0.42, BENCH_Z, metalMat],
-    [0.08, 0.84, 0.6, 1.3, 0.42, BENCH_Z, metalMat],
-  ] },
-  { name: 'bed', hp: 20, obstacle: { x: 13.85, z: 3.6, w: 2.1, d: 1.55, rot: 0 }, boxes: [
-    [2.0, 0.26, 1.5, 13.8, 0.17, 3.6, MATS.darkWood],
-    [0.08, 0.95, 1.55, 14.84, 0.475, 3.6, MATS.darkWood],
-  ] },
-];
+const shellGroups = {};
+for (const [key, shell] of Object.entries(SHELLS)) {
+  const group = new THREE.Group();
+  for (const [w, h, d, x, y, z, mat] of shell.boxes) staticBox(w, h, d, x, y, z, mat, { parent: group });
+  for (const [w, d, x, y, z, mat] of shell.ceilings) {
+    const c = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+    c.rotation.x = Math.PI / 2; // facing down
+    c.position.set(x, y, z);
+    group.add(c);
+  }
+  for (const [text, x, y, z] of shell.neons) neonSign(text, x, y, z, group);
+  scene.add(group);
+  shellGroups[key] = group;
+}
+
+let level = LEVELS[0];
+let ROOM = level.room;
+
+// Furniture stays put until it is smashed. Then it collapses into pieces and
+// everything standing on it falls. kind: 'wood' (default), 'metal' or 'glass'.
 const furniture = [];
 
 function buildFurniture() {
   for (const f of furniture) if (!f.broken) removeFurniturePieces(f);
   furniture.length = 0;
-  for (const def of FURNITURE) {
+  for (const def of level.furniture()) {
     const f = { def, hp: def.hp, broken: false, pieces: [], obstacle: { ...def.obstacle } };
     for (const [w, h, d, x, y, z, mat, rotY = 0] of def.boxes) {
       const body = staticBox(w, h, d, x, y, z, mat, { rotY });
@@ -279,6 +234,8 @@ function joltFurniture(f, strength) {
 }
 
 function hitFurniture(f, hit, dir, weapon) {
+  const kind = f.def.kind || 'wood';
+  if (kind === 'glass') { collapseFurniture(f, dir); return; } // any hit shatters glass
   if (weapon === 'knife' && f.def.soft) {
     f.hp -= 1;
     addCut(hit, rand(0.12, 0.24));
@@ -289,8 +246,8 @@ function hitFurniture(f, hit, dir, weapon) {
     return;
   }
   if (weapon === 'knife') {
-    // A knife only carves the wood
-    addCut(hit, rand(0.1, 0.2));
+    // A knife only carves wood and scratches metal
+    addCut(hit, rand(0.1, 0.2), kind === 'metal' ? scratchMat : cutMat);
     sfx.scrape();
     haptic('hit');
     return;
@@ -299,9 +256,15 @@ function hitFurniture(f, hit, dir, weapon) {
   f.hp -= dmg;
   joltFurniture(f, dmg * 0.6);
   if (f.hp <= 0) { collapseFurniture(f, dir); return; }
-  addCut(hit, rand(0.15, 0.3)); // a crack in the wood
-  burst(hit.point, 0xb08a60, 25, 1.8, false);
-  if (weapon === 'fists') sfx.punch(); else sfx.wood();
+  if (kind === 'metal') {
+    addCut(hit, rand(0.1, 0.2), scratchMat);
+    burst(hit.point, 0xffd08a, 18, 2.5, true);
+    sfx.metal(weapon === 'fists' ? 0.6 : 1);
+  } else {
+    addCut(hit, rand(0.15, 0.3)); // a crack in the wood
+    burst(hit.point, 0xb08a60, 25, 1.8, false);
+    if (weapon === 'fists') sfx.punch(); else sfx.wood();
+  }
   shake = Math.max(shake, 0.035);
   haptic('hit');
 }
@@ -313,6 +276,28 @@ function collapseFurniture(f, dir) {
     const [x, y, z] = f.pieces[1].pos;
     spillStuffing('foam', new THREE.Vector3(x, y, z), 2);
     sfx.rip();
+  }
+  const kind = f.def.kind || 'wood';
+  if (kind === 'glass') {
+    // A pane bursts into flat shards
+    for (const p of f.pieces) {
+      const [w, h, d] = p.size;
+      const [x, y, z] = p.pos;
+      const n = THREE.MathUtils.clamp(Math.round(Math.max(w * h, h * d) * 10), 8, 26);
+      for (let i = 0; i < n; i++) {
+        const b = rand(0.06, 0.16);
+        const pos = new THREE.Vector3(x + rand(-0.5, 0.5) * w, y + rand(-0.5, 0.5) * h, z + rand(-0.5, 0.5) * d);
+        const vel = dir.clone().multiplyScalar(rand(1.5, 4)).add(new THREE.Vector3(rand(-1, 1), rand(0, 2), rand(-1, 1)));
+        addShard(pick(shardGeos), p.mesh.material, pos, new THREE.Vector3(b, b * rand(0.1, 0.25), b * rand(0.6, 1.3)), vel);
+      }
+      burst(new THREE.Vector3(x, y, z), 0xe6f4ff, 60, 3, true);
+    }
+    for (const e of entities) e.body.wakeUp();
+    countSmash();
+    sfx.glass(1.3);
+    shake = Math.max(shake, 0.05);
+    haptic('heavy');
+    return;
   }
   for (const p of f.pieces) {
     const [w, h, d] = p.size;
@@ -328,33 +313,20 @@ function collapseFurniture(f, dir) {
       const vel = dir.clone().multiplyScalar(rand(1, 3)).add(new THREE.Vector3(rand(-1.5, 1.5), rand(0.5, 2.5), rand(-1.5, 1.5)));
       addShard(boxChunk, p.mesh.material, pos, scale, vel);
     }
-    burst(new THREE.Vector3(x, y, z), 0xb08a60, 30, 2, false);
+    burst(new THREE.Vector3(x, y, z), kind === 'metal' ? 0x9a9a9a : 0xb08a60, 30, 2, false);
   }
   // Everything that was resting on it is now in free fall
   for (const e of entities) e.body.wakeUp();
   countSmash();
-  sfx.wood();
+  if (kind === 'metal') sfx.metal(1.2); else sfx.wood();
   sfx.thud();
   shake = Math.max(shake, 0.07);
   haptic('heavy');
 }
 
-// Neon signs
-function neonSign(text, x, y, z) {
-  const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.4, 0.6),
-    new THREE.MeshBasicMaterial({ map: neonTexture(text), transparent: true, toneMapped: false }),
-  );
-  m.position.set(x, y, z);
-  scene.add(m);
-  return m;
-}
-const neons = [neonSign('SMASH IT', 0, 2.45, -2.88), neonSign('WRECK IT', 9.5, 3.45, -2.88)];
-
 // Footprints of the furniture, so the player walks around it instead of through it.
 const PLAYER_R = 0.28;
 const obstacles = []; // furniture and vehicles add theirs
-buildFurniture();
 
 // The player's body pushes bottles and shards around when walking into them.
 const playerBody = new CANNON.Body({ type: CANNON.Body.KINEMATIC, shape: new CANNON.Box(new CANNON.Vec3(PLAYER_R, 0.85, PLAYER_R)) });
@@ -399,7 +371,7 @@ let smashed = 0;
 
 function countSmash() {
   smashed++;
-  ui.count.textContent = `${smashed} smashed`;
+  updateHud();
 }
 
 function spawn(typeName, x, baseY, z, rotY = Math.random() * Math.PI * 2, tilt = 0) {
@@ -451,58 +423,8 @@ function removeEnt(ent) {
   if (i >= 0) entities.splice(i, 1);
 }
 
-function layoutRoom() {
-  // Table: glasses, bottles, plates, mugs
-  [-1.05, -0.88, -0.71].forEach((x) => spawn('tumbler', x, TABLE_TOP, 0.25));
-  [-0.45, -0.25].forEach((x) => spawn('wine', x, TABLE_TOP, 0.3));
-  [0.05, 0.22, 0.39].forEach((x) => spawn('bottle', x, TABLE_TOP, 0.12));
-  for (let i = 0; i < 4; i++) spawn('plate', 0.85, TABLE_TOP + i * 0.023, 0.2, 0);
-  [-1.0, -0.72].forEach((x) => spawn('mug', x, TABLE_TOP, -0.2));
-  spawn('vase', -0.25, TABLE_TOP, -0.22);
-  spawn('wine', 0.62, TABLE_TOP, -0.15);
-  spawn('tumbler', 1.12, TABLE_TOP, -0.15);
-
-  // Lower shelf: vases and bottles
-  [-1.5, -0.5, 0.6, 1.55].forEach((x) => spawn('vase', x, SHELF_LOW, SHELF_Z));
-  [-1.05, 0.05, 1.05].forEach((x) => spawn('bottle', x, SHELF_LOW, SHELF_Z));
-  // Upper shelf: a row of glasses
-  for (let i = 0; i < 12; i++) spawn(i % 3 === 1 ? 'wine' : 'tumbler', -1.8 + i * 0.33, SHELF_HIGH, SHELF_Z);
-
-  // Electronics
-  spawn('tv', -2.35, 0.95, -1.3, 0.45);
-  spawn('monitor', 2.35, 0.75, -1.3, -0.45);
-
-  // Workbench: laptop, lamp, teapot, jars, plants, printer (screens face the room)
-  spawn('laptop', -2.1, BENCH_TOP, BENCH_Z, Math.PI);
-  spawn('lamp', -1.6, BENCH_TOP, BENCH_Z + 0.1);
-  spawn('teapot', -1.15, BENCH_TOP, BENCH_Z);
-  [-0.8, -0.62, -0.44].forEach((x) => spawn('jar', x, BENCH_TOP, BENCH_Z));
-  [-0.05, 0.35].forEach((x) => spawn('flowerpot', x, BENCH_TOP, BENCH_Z));
-  spawn('printer', 0.9, BENCH_TOP, BENCH_Z, Math.PI);
-
-  // Floor: chairs, crates, a standing mirror and a few strays
-  spawn('chair', -1.9, 0, 1.6, 2.6);
-  spawn('chair', 1.9, 0, 1.7, -2.4);
-  spawn('crate', 2.9, 0, 3.9, 0.2);
-  spawn('crate', 3.0, 0, 3.3, -0.1);
-  spawn('crate', 2.95, 0.5, 3.6, 0.5);
-  spawn('mirror', -3.38, 0, 1.6, Math.PI / 2, -0.1);
-  spawn('vase', 1.75, 0, 0.7);
-  spawn('bottle', -1.75, 0, 0.75);
-
-  // Bed with pillows and a teddy
-  spawn('mattress', 13.8, BED_TOP, 3.6, 0);
-  spawn('pillow', 14.45, BED_TOP + 0.22, 3.25, Math.PI / 2);
-  spawn('pillow', 14.45, BED_TOP + 0.22, 3.95, Math.PI / 2);
-  spawn('teddy', 13.95, BED_TOP + 0.22, 3.6, -Math.PI / 2);
-
-  // Sofa against the front wall, with seat cushions and a pillow
-  spawn('sofa', 5.4, 0, 4.45, Math.PI);
-  [-0.53, 0, 0.53].forEach((dx) => spawn('cushion', 5.4 + dx, 0.52, 4.37, Math.PI));
-  spawn('pillow', 4.9, 0.66, 4.4, Math.PI + 0.3);
-
-  // Spare tyres stacked by the bus
-  for (let i = 0; i < 3; i++) spawn('tyre', 14.45, i * 0.181, 0.75, rand(0, 6));
+function layoutLevel() {
+  for (const [type, x, y, z, rotY, tilt] of level.items()) spawn(type, x, y, z, rotY ?? Math.random() * Math.PI * 2, tilt ?? 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -549,6 +471,7 @@ for (const spotDef of VEHICLE_SPOTS) {
 function buildVehicles() {
   for (const v of vehicles) { scene.remove(v.group); v.stopAlarm?.(); }
   vehicles.length = 0;
+  if (!level.vehicles) return;
   for (const spotDef of VEHICLE_SPOTS) {
     const v = spotDef.build();
     v.group.position.set(spotDef.x, 0, spotDef.z);
@@ -713,18 +636,129 @@ function processVehicleImpacts() {
   vehicleImpacts.length = 0;
 }
 
-function resetRoom() {
-  if (held) { held = null; }
+// ---------------------------------------------------------------------------
+// Levels
+// ---------------------------------------------------------------------------
+const save = loadSave();
+const levelStats = { entities: 0, furniture: 0, parts: 0 };
+let levelDone = 0; // fraction smashed
+let completeShown = false;
+
+function loadSave() {
+  const fallback = { unlocked: 1, best: {} };
+  try {
+    const raw = window.localStorage.getItem('rageroom.progress');
+    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
+  } catch (_) { return fallback; }
+}
+function storeSave() {
+  try { window.localStorage.setItem('rageroom.progress', JSON.stringify(save)); } catch (_) { /* progress just isn't kept */ }
+}
+
+// Things in a vehicle that count toward the level: glass, lights, mirrors, tyres.
+const countsForLevel = (part) => ['window', 'light', 'mirror'].includes(part.kind);
+
+function loadLevel(index) {
+  level = LEVELS[index];
+  ROOM = level.room;
+  if (held) dropHeld();
   for (const e of [...entities]) removeEnt(e);
   for (const s of shards) { scene.remove(s.mesh); world.removeBody(s.body); }
   shards.length = 0;
   pendingBreaks.clear();
   tweens.length = 0;
+  for (const [key, group] of Object.entries(shellGroups)) group.visible = key === level.shell;
+  setLevelLights(level.lights);
   buildFurniture();
-  layoutRoom();
+  layoutLevel();
   buildVehicles();
+
+  levelStats.entities = entities.length;
+  levelStats.furniture = furniture.length;
+  levelStats.parts = vehicles.reduce((n, v) => n + v.parts.filter(countsForLevel).length + v.wheels.length, 0);
+  smashed = 0;
+  levelDone = 0;
+  completeShown = (save.best[index] ?? 0) >= 1;
+  player.x = level.spawn.x; player.z = level.spawn.z; player.vx = player.vz = 0; player.floor = 0;
+  look.yaw = look.targetYaw = level.spawn.yaw;
+  look.pitch = look.targetPitch = -0.18;
+  ui.levelName.textContent = `Level ${index + 1} · ${level.name}`;
   ui.cleared.hidden = true;
-  clearedShown = false;
+  ui.map.hidden = true;
+  updateHud();
+}
+
+function levelProgress() {
+  const total = levelStats.entities + levelStats.furniture + levelStats.parts;
+  const entsLeft = entities.filter((e) => !e.punctured).length;
+  let done = levelStats.entities - entsLeft + furniture.filter((f) => f.broken).length;
+  for (const v of vehicles) done += v.parts.filter((p) => countsForLevel(p) && p.broken).length + v.wheels.filter((w) => w.punctured).length;
+  return total ? Math.min(1, done / total) : 1;
+}
+
+function updateHud() {
+  const pct = Math.round(levelDone * 100);
+  ui.count.textContent = `${smashed} smashed · ${pct}%`;
+  ui.barFill.style.width = `${pct}%`;
+  ui.bar.classList.toggle('done', levelDone >= UNLOCK_AT);
+}
+
+function checkLevelProgress() {
+  const index = LEVELS.indexOf(level);
+  levelDone = levelProgress();
+  updateHud();
+  if (levelDone > (save.best[index] ?? 0)) { save.best[index] = levelDone; storeSave(); }
+  if (levelDone >= UNLOCK_AT && save.unlocked < index + 2 && index + 1 < LEVELS.length) {
+    save.unlocked = index + 2;
+    storeSave();
+    showComplete(`${LEVELS[index + 1].name} unlocked!`, `You smashed ${Math.round(levelDone * 100)}% of the ${level.name}.`);
+  } else if (levelDone >= 1 && !completeShown) {
+    completeShown = true;
+    showComplete('Everything destroyed 😤', index + 1 < LEVELS.length ? 'Not a single thing left standing.' : 'You wrecked every level. Feeling better?');
+  }
+}
+
+function showComplete(title, text) {
+  const index = LEVELS.indexOf(level);
+  document.exitPointerLock?.();
+  ui.clearTitle.textContent = title;
+  ui.clearText.textContent = text;
+  ui.next.hidden = index + 1 >= LEVELS.length || save.unlocked < index + 2;
+  ui.cleared.hidden = false;
+}
+
+function setLevelLights(l) {
+  const [mx, my, mz, mtx, mty, mtz] = l.main;
+  spot.position.set(mx, my, mz);
+  spot.target.position.set(mtx, mty, mtz);
+  const [fx, fy, fz, ftx, fty, ftz, fi] = l.fill;
+  garageSpot.position.set(fx, fy, fz);
+  garageSpot.target.position.set(ftx, fty, ftz);
+  garageSpot.intensity = fi;
+  neonLight.position.set(...l.neon);
+  busLight.intensity = l.bus ? 3 : 0;
+}
+
+function openMap() {
+  document.exitPointerLock?.();
+  const current = LEVELS.indexOf(level);
+  ui.mapList.innerHTML = '';
+  LEVELS.forEach((lv, i) => {
+    const locked = i + 1 > save.unlocked;
+    const best = Math.round((save.best[i] ?? 0) * 100);
+    const stop = document.createElement('button');
+    stop.className = `stop${locked ? ' locked' : ''}${i === current ? ' here' : ''}`;
+    stop.disabled = locked;
+    stop.innerHTML = `<span class="dot">${locked ? '🔒' : i + 1}</span><span class="info"><b>${lv.name}</b><small>${locked ? `Smash ${Math.round(UNLOCK_AT * 100)}% of ${LEVELS[i - 1].name} to open` : lv.blurb}</small></span><span class="best">${locked ? '' : `${best}%`}</span>`;
+    stop.addEventListener('click', () => loadLevel(i));
+    ui.mapList.appendChild(stop);
+  });
+  ui.cleared.hidden = true;
+  ui.map.hidden = false;
+}
+
+function resetRoom() {
+  loadLevel(LEVELS.indexOf(level));
 }
 
 // ---------------------------------------------------------------------------
@@ -1446,6 +1480,7 @@ window.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'Space') { e.preventDefault(); act(new THREE.Vector2(0, 0)); }
   if (e.code === 'KeyR') resetRoom();
+  if (e.code === 'KeyM') { if (ui.map.hidden) openMap(); else ui.map.hidden = true; }
   if (e.code === 'Equal' || e.code === 'NumpadAdd') { zoomBy(1 / 1.2); showZoom(); }
   if (e.code === 'Minus' || e.code === 'NumpadSubtract') { zoomBy(1.2); showZoom(); }
   if (MODE_KEYS[e.code]) setMode(MODE_KEYS[e.code]);
@@ -1543,6 +1578,14 @@ function updatePlayer(dt) {
 // ---------------------------------------------------------------------------
 const ui = {
   count: document.getElementById('count'),
+  levelName: document.getElementById('level-name'),
+  bar: document.getElementById('bar'),
+  barFill: document.getElementById('bar-fill'),
+  map: document.getElementById('map'),
+  mapList: document.getElementById('map-list'),
+  clearTitle: document.getElementById('clear-title'),
+  clearText: document.getElementById('clear-text'),
+  next: document.getElementById('next'),
   hint: document.getElementById('hint'),
   cleared: document.getElementById('cleared'),
   mute: document.getElementById('mute'),
@@ -1550,6 +1593,11 @@ const ui = {
 };
 document.getElementById('reset').addEventListener('click', resetRoom);
 document.getElementById('refill').addEventListener('click', resetRoom);
+document.getElementById('map-btn').addEventListener('click', openMap);
+document.getElementById('map-close').addEventListener('click', () => { ui.map.hidden = true; });
+document.getElementById('keep').addEventListener('click', () => { ui.cleared.hidden = true; });
+document.getElementById('open-map').addEventListener('click', openMap);
+ui.next.addEventListener('click', () => loadLevel(LEVELS.indexOf(level) + 1));
 ui.mute.addEventListener('click', () => {
   setMuted(!isMuted());
   ui.mute.textContent = isMuted() ? '🔇' : '🔊';
@@ -1563,8 +1611,7 @@ function toast(text) {
   toastTimer = setTimeout(() => ui.toast.classList.remove('show'), 1100);
 }
 
-let clearedShown = false;
-let clearedTimer = 0;
+let progressTick = 0;
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -1643,16 +1690,13 @@ function frame() {
 
   for (const n of neons) n.material.opacity = Math.random() < 0.015 ? 0.4 : 1;
 
-  if (!clearedShown && entities.every((e) => e.punctured)) {
-    clearedTimer += dt;
-    if (clearedTimer > 1.2) { ui.cleared.hidden = false; clearedShown = true; }
-  } else clearedTimer = 0;
+  progressTick += dt;
+  if (progressTick > 0.3) { progressTick = 0; checkLevelProgress(); }
 
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 
 hands.l.visible = hands.r.visible = false;
-layoutRoom();
-buildVehicles();
+loadLevel(0);
 frame();
