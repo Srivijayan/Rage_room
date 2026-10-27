@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Rage Room</title>
+<style>
+  :root { --pink: #ff2d6f; --ink: #f6f1ee; --bg: #0c0a0f; color-scheme: dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #app, canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #hud { position: fixed; top: calc(env(safe-area-inset-top) + 14px); left: 16px; pointer-events: none; }
+  .title { font-weight: 900; font-size: 22px; letter-spacing: 2px; }
+  .title span { color: var(--pink); text-shadow: 0 0 12px var(--pink); }
+  #count { font-size: 14px; opacity: .8; margin-top: 2px; }
+  #buttons { position: fixed; top: calc(env(safe-area-inset-top) + 12px); right: 16px; display: flex; gap: 8px; }
+  button { font: inherit; font-weight: 700; color: var(--ink); background: rgba(20,16,24,.7);
+    border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 9px 14px; cursor: pointer;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  button:active { transform: scale(.96); }
+  body.in-app #hud { left: 72px; top: calc(env(safe-area-inset-top) + 24px); }
+  body.in-app .title { display: none; }
+  #hud, #hint { text-shadow: 0 1px 4px rgba(0,0,0,.75); }
+  #joy { position: fixed; left: calc(env(safe-area-inset-left) + 28px); bottom: calc(env(safe-area-inset-bottom) + 28px);
+    width: 128px; height: 128px; border-radius: 50%; touch-action: none; display: none;
+    background: rgba(20,16,24,.35); border: 2px solid rgba(255,255,255,.22); }
+  body.touch #joy { display: block; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px; border-radius: 50%;
+    background: rgba(255,45,111,.8); box-shadow: 0 0 14px rgba(255,45,111,.6); pointer-events: none; }
+  #toast { position: fixed; left: 50%; top: 42%; transform: translate(-50%, 8px); padding: 10px 18px; border-radius: 999px;
+    background: rgba(20,16,24,.8); font-weight: 700; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; white-space: nowrap; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #modes { position: fixed; right: calc(env(safe-area-inset-right) + 16px); bottom: calc(env(safe-area-inset-bottom) + 24px);
+    display: flex; flex-direction: column; gap: 10px; }
+  #modes button { width: 72px; padding: 12px 0; font-size: 14px; letter-spacing: .5px; }
+  #modes button.on { background: var(--pink); border-color: var(--pink); box-shadow: 0 0 16px rgba(255,45,111,.55); }
+  #hint { position: fixed; top: calc(env(safe-area-inset-top) + 68px); left: 50%; transform: translateX(-50%);
+    background: rgba(20,16,24,.75); padding: 10px 18px; border-radius: 999px; font-size: 14px; white-space: nowrap;
+    pointer-events: none; transition: opacity .6s; }
+  #hint.gone { opacity: 0; }
+  #cleared { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; background: rgba(12,10,15,.55); text-align: center; padding: 16px; }
+  #cleared[hidden] { display: none; }
+  #cleared h2 { margin: 0; font-size: 30px; font-weight: 900; }
+  #cleared p { margin: 0; opacity: .8; }
+  #refill { background: var(--pink); border-color: var(--pink); padding: 12px 22px; font-size: 16px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="hud"><div class="title">RAGE <span>ROOM</span></div><div id="count">0 smashed</div></div>
+<div id="buttons"><button id="mute" aria-label="Sound on or off">🔊</button><button id="reset">↻ Refill</button></div>
+<div id="hint">Tap to swing · Drag to look around</div>
+<div id="modes" role="group" aria-label="Weapon">
+  <button data-mode="bat" class="on">Bat</button>
+  <button data-mode="fists">Fists</button>
+  <button data-mode="knife">Knife</button>
+  <button data-mode="grab">Grab</button>
+</div>
+<div id="joy" aria-label="Walk joystick"><div id="knob"></div></div>
+<div id="toast" role="status"></div>
+<div id="cleared" hidden>
+  <h2>Room cleared 😤</h2>
+  <p>Feeling better?</p>
+  <button id="refill">Bring more stuff</button>
+</div>
+<script>/*GAME_JS*/</script>
+</body>
+</html>
