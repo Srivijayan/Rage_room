@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx, unlockAudio, setMuted, isMuted } from './audio.js';
-import { brickTexture, concreteTexture, neonTexture, hazardTexture, crackedGlassTexture } from './textures.js';
+import { brickTexture, concreteTexture, neonTexture, hazardTexture, crackedGlassTexture, fabricTexture } from './textures.js';
 import { TYPES, MATS, drawScreen, crackScreen, rand, pick } from './objects.js';
 import { buildCar, buildBus } from './vehicles.js';
 
@@ -36,7 +36,7 @@ scene.environmentIntensity = 0.4;
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.05, 45);
 camera.rotation.order = 'YXZ';
 const EYE = 1.6;
-const player = { x: 0, z: 2.6, vx: 0, vz: 0, bob: 0 };
+const player = { x: 0, z: 2.6, vx: 0, vz: 0, bob: 0, floor: 0 }; // floor: height stood on (bus floor, door step)
 camera.position.set(player.x, EYE, player.z);
 scene.add(camera);
 
@@ -113,6 +113,11 @@ garageSpot.position.set(9.5, 4.6, 1.2);
 garageSpot.target.position.set(9.5, 0, 0.4);
 scene.add(garageSpot, garageSpot.target);
 
+// Light inside the bus (its roof blocks the garage light)
+const busLight = new THREE.PointLight(0xfff2d8, 3, 8, 1.5);
+busLight.position.set(9.5, 2.2, -1.6);
+scene.add(busLight);
+
 const neonLight = new THREE.PointLight(0xff2d6f, 6, 6, 1.5);
 neonLight.position.set(0, 2.4, -2.4);
 scene.add(neonLight);
@@ -182,7 +187,29 @@ const SHELF_Z = -2.55;
 const SHELF_LOW = 0.92, SHELF_HIGH = 1.67;
 const BENCH_TOP = 0.9, BENCH_Z = 4.5;
 const BED_TOP = 0.3;
+const BUS_X = 9.5, BUS_Z = -1.6, BUS_FLOOR = 0.4;
+const seatMat = new THREE.MeshStandardMaterial({ map: fabricTexture('#34509e'), roughness: 1 });
+
+// Bus seats face the front (+x): pedestal, cushion and backrest. Soft: the
+// knife can slash them as well as the bat and fists.
+function busSeat(lx, lz, width = 0.8) {
+  const x = BUS_X + lx, z = BUS_Z + lz;
+  return { name: 'bus seat', hp: 4, soft: true, obstacle: { x: x - 0.02, z, w: 0.5, d: width, rot: 0 }, boxes: [
+    [0.12, 0.35, width * 0.6, x, BUS_FLOOR + 0.175, z, metalMat],
+    [0.45, 0.1, width, x, BUS_FLOOR + 0.4, z, seatMat],
+    [0.08, 0.6, width, x - 0.22, BUS_FLOOR + 0.7, z, seatMat],
+  ] };
+}
+const BUS_SEATS = [];
+for (let i = 0; i < 7; i++) {
+  const lx = -4.3 + i * 1.05;
+  BUS_SEATS.push(busSeat(lx, -0.78));
+  if (lx < 1.4 || lx > 3.3) BUS_SEATS.push(busSeat(lx, 0.78)); // keep the doorway clear
+}
+BUS_SEATS.push(busSeat(4.0, -0.6, 0.5)); // driver
+
 const FURNITURE = [
+  ...BUS_SEATS,
   { name: 'table', hp: 6, obstacle: { x: 0, z: 0.05, w: 2.7, d: 1.0, rot: 0 }, boxes: [
     [2.7, 0.08, 1.0, 0, 0.78, 0.05, MATS.wood],
     ...[[-1.25, -0.38], [1.25, -0.38], [-1.25, 0.48], [1.25, 0.48]].map(([x, z]) => [0.08, 0.74, 0.08, x, 0.37, z, MATS.darkWood]),
@@ -252,6 +279,15 @@ function joltFurniture(f, strength) {
 }
 
 function hitFurniture(f, hit, dir, weapon) {
+  if (weapon === 'knife' && f.def.soft) {
+    f.hp -= 1;
+    addCut(hit, rand(0.12, 0.24));
+    sfx.rip();
+    spillStuffing('foam', hit.point, 0.6);
+    haptic('hit');
+    if (f.hp <= 0) collapseFurniture(f, dir);
+    return;
+  }
   if (weapon === 'knife') {
     // A knife only carves the wood
     addCut(hit, rand(0.1, 0.2));
@@ -273,6 +309,11 @@ function hitFurniture(f, hit, dir, weapon) {
 function collapseFurniture(f, dir) {
   f.broken = true;
   removeFurniturePieces(f);
+  if (f.def.soft) {
+    const [x, y, z] = f.pieces[1].pos;
+    spillStuffing('foam', new THREE.Vector3(x, y, z), 2);
+    sfx.rip();
+  }
   for (const p of f.pieces) {
     const [w, h, d] = p.size;
     const [x, y, z] = p.pos;
@@ -468,7 +509,7 @@ function layoutRoom() {
 // Vehicles
 // ---------------------------------------------------------------------------
 const VEHICLE_SPOTS = [
-  { build: () => buildBus(), x: 9.5, z: -1.6 },
+  { build: () => buildBus(), x: BUS_X, z: BUS_Z },
   { build: () => buildCar(0xc8102e), x: 9.0, z: 3.0 },
 ];
 const vehicles = [];
@@ -494,7 +535,15 @@ for (const spotDef of VEHICLE_SPOTS) {
     });
     return body;
   });
-  obstacles.push({ x: spotDef.x, z: spotDef.z, w: v.footprint.w, d: v.footprint.d, rot: 0 });
+  if (v.interior) {
+    // Walk-in vehicle: block only its walls (with the door gap) and remember its floor
+    spotDef.interior = v.interior;
+    for (const c of v.colliders) {
+      if (c.h > 1.5) obstacles.push({ x: spotDef.x + c.x, z: spotDef.z + c.z, w: c.w, d: Math.max(c.d, 0.12), rot: 0 });
+    }
+  } else {
+    obstacles.push({ x: spotDef.x, z: spotDef.z, w: v.footprint.w, d: v.footprint.d, rot: 0 });
+  }
 }
 
 function buildVehicles() {
@@ -1438,6 +1487,19 @@ document.getElementById('hint').textContent = isTouch
   ? 'Joystick to walk · Drag to look · Pinch to zoom · Tap to hit'
   : 'Click to lock the mouse · WASD to walk · Wheel to zoom · 1-4 to switch';
 
+// Height of whatever the player stands on: a bus floor, its door step, or the ground.
+function floorHeightAt(x, z) {
+  for (const spotDef of VEHICLE_SPOTS) {
+    const r = spotDef.interior;
+    if (!r) continue;
+    const lx = x - spotDef.x, lz = z - spotDef.z;
+    if (lx > r.minX && lx < r.maxX && lz > r.minZ && lz < r.maxZ) return r.y;
+    const st = r.step;
+    if (Math.abs(lx - st.x) < st.w / 2 && lz >= st.minZ && lz < st.maxZ) return st.y;
+  }
+  return 0;
+}
+
 const WALK_SPEED = 2.6;
 const JOY_DEAD = 0.15;
 function updatePlayer(dt) {
@@ -1467,8 +1529,9 @@ function updatePlayer(dt) {
   resolvePlayer();
   const moved = Math.hypot(player.x - ox, player.z - oz);
   if (moved > 0.0005) player.bob += moved * 9;
+  player.floor += (floorHeightAt(player.x, player.z) - player.floor) * (1 - Math.exp(-dt * 12));
   if (dt > 0) playerBody.velocity.set((player.x - ox) / dt, 0, (player.z - oz) / dt);
-  playerBody.position.set(player.x, 0.85, player.z);
+  playerBody.position.set(player.x, player.floor + 0.85, player.z);
 }
 
 // ---------------------------------------------------------------------------
@@ -1565,7 +1628,7 @@ function frame() {
   flash.intensity *= Math.pow(0.002, dt);
 
   camera.rotation.set(look.pitch, look.yaw, 0);
-  camera.position.set(player.x, EYE + Math.sin(player.bob) * 0.012, player.z);
+  camera.position.set(player.x, player.floor + EYE + Math.sin(player.bob) * 0.012, player.z);
   if (shake > 0.0005) {
     camera.position.x += rand(-1, 1) * shake * 0.7;
     camera.position.y += rand(-1, 1) * shake * 0.7;

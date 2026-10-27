@@ -20,6 +20,8 @@ You have to walk up to things (reach is measured along the floor, so you can ben
 
 **Toughness:** glass and ceramics break in one hit; chairs and crates take 2 bat hits; the laptop 2; the monitor and printer 2; the TV 3 (twice as many punches each). Vehicle windows crack on the first hit and shatter on the next; lights and the bus destination board shatter in one hit; mirrors snap off; the bodywork dents where you hit it. Hitting the car sets off its alarm; hitting the bus sounds its horn. Bats and fists just bounce off soft things and tyres. A flat tyre makes the vehicle sag onto that corner. Soft things take knife stabs: pillows, cushions and the teddy 2, the mattress 5, the sofa 8.
 
+**Inside the bus:** walk through the door on the lane side (between the wheels) and step up. Inside are 13 double seats and the driver's seat; each breaks after 2 bat hits (4 punches or knife slashes) into pieces and foam. You can break the windows and dent the walls from inside too.
+
 **Furniture breaks too:** the table, shelf, workbench, TV crate, monitor desk and bed frame crack with each bat hit or punch, make whatever is standing on them hop, and finally collapse into planks, dropping everything on top. Bat hits to break: monitor desk 2, table and TV crate 3, shelf and workbench 4, bed 5 (twice as many punches). A knife only carves them. Refill rebuilds them.
 
 ## Project layout

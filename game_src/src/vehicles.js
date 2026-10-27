@@ -18,7 +18,9 @@ const rubber = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 
 const rimMat = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, roughness: 0.25, metalness: 0.9 });
 const trimMat = new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.6 });
 const seatMat = new THREE.MeshStandardMaterial({ color: 0x2a2522, roughness: 0.9 });
-const cabinMat = new THREE.MeshStandardMaterial({ color: 0x1b1b20, roughness: 0.9 });
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x2b2b30, roughness: 0.9 });
+const ceilingMat = new THREE.MeshStandardMaterial({ color: 0xd9d6cc, roughness: 0.8 });
+const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff4dc });
 
 function box(w, h, d, mat, x, y, z, segs) {
   const geo = segs ? new THREE.BoxGeometry(w, h, d, ...segs) : new THREE.BoxGeometry(w, h, d);
@@ -121,18 +123,51 @@ export function buildBus(route = '21G  BROADWAY') {
   const headM = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4d6, emissiveIntensity: 1.2 });
   const tailM = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff1a1a, emissiveIntensity: 0.8 });
 
-  add(box(10, 1.15, 2.5, paint, 0, 0.975, 0, [80, 6, 16]), 'panel');
-  add(box(10.02, 0.12, 2.52, cream, 0, 1.45, 0), 'trim'); // stripe
-  add(box(9.9, 0.9, 2.42, cabinMat, 0, 2.0, 0), 'trim'); // dark interior seen through the glass
+  // Hollow body you can walk into: floor, ceiling, thin walls, and a door gap
+  // on the +z side between the axles.
+  const FLOOR = 0.4, ROOF = 2.45;
+  const DOOR_A = 1.85, DOOR_B = 2.95; // door opening along x
+  const LOW_H = 1.2, LOW_Y = FLOOR + LOW_H / 2;
+  const behindDoor = { w: DOOR_A + 5, x: (DOOR_A - 5) / 2 };
+  const aheadDoor = { w: 5 - DOOR_B, x: (5 + DOOR_B) / 2 };
+  add(box(9.94, 0.1, 2.44, floorMat, 0, FLOOR - 0.05, 0), 'trim');
+  add(box(9.94, 0.04, 2.44, ceilingMat, 0, ROOF - 0.02, 0), 'trim');
   add(box(10, 0.45, 2.5, cream, 0, 2.675, 0, [80, 2, 16]), 'panel'); // roof
+  add(box(10, LOW_H, 0.06, paint, 0, LOW_Y, -1.22, [80, 8, 1]), 'panel');
+  add(box(behindDoor.w, LOW_H, 0.06, paint, behindDoor.x, LOW_Y, 1.22, [55, 8, 1]), 'panel');
+  add(box(aheadDoor.w, LOW_H, 0.06, paint, aheadDoor.x, LOW_Y, 1.22, [16, 8, 1]), 'panel');
+  add(box(0.06, LOW_H, 2.5, paint, 5.0, LOW_Y, 0, [1, 8, 16]), 'panel');
+  add(box(0.06, LOW_H, 2.5, paint, -5.0, LOW_Y, 0, [1, 8, 16]), 'panel');
+  add(box(10.02, 0.12, 0.08, cream, 0, 1.45, -1.22), 'trim'); // stripes
+  add(box(behindDoor.w, 0.12, 0.08, cream, behindDoor.x, 1.45, 1.22), 'trim');
+  add(box(aheadDoor.w, 0.12, 0.08, cream, aheadDoor.x, 1.45, 1.22), 'trim');
 
-  // Seven windows a side with pillars between them
+  // Seven windows a side with pillars between them; the door replaces one on +z
   for (const side of [1, -1]) {
-    for (let i = 0; i < 7; i++) add(box(1.15, 0.8, 0.02, glass, -4.1 + i * 1.3, 2.0, side * 1.24), 'window', 2);
+    for (let i = 0; i < 7; i++) {
+      if (side === 1 && i === 5) continue;
+      add(box(1.15, 0.8, 0.02, glass, -4.1 + i * 1.3, 2.0, side * 1.24), 'window', 2);
+    }
     for (let i = 0; i < 6; i++) add(box(0.15, 0.9, 0.04, paint, -3.45 + i * 1.3, 2.0, side * 1.25), 'panel');
     add(box(0.725, 0.9, 0.04, paint, 4.64, 2.0, side * 1.25), 'panel');
     add(box(0.325, 0.9, 0.04, paint, -4.84, 2.0, side * 1.25), 'panel');
+    add(box(0.04, 0.9, 0.35, paint, -5.0, 2.0, side * 1.075), 'panel'); // rear corners
   }
+
+  // Inside: ceiling lights, grab poles, dashboard and steering wheel, door step
+  for (const z of [-0.45, 0.45]) add(box(8.2, 0.02, 0.12, lampMat, -0.3, ROOF - 0.05, z), 'trim');
+  for (const [x, z] of [[-2.6, 0.42], [0.45, -0.42], [1.75, 0.42], [3.1, 0.42]]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, ROOF - FLOOR, 10), rimMat);
+    pole.position.set(x, (ROOF + FLOOR) / 2, z);
+    add(pole, 'trim');
+  }
+  add(box(0.35, 0.25, 2.3, trimMat, 4.8, 1.3, 0), 'trim');
+  const steering = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.025, 8, 24), trimMat);
+  steering.position.set(4.5, 1.35, -0.6);
+  steering.rotation.set(0, Math.PI / 2, 0.5);
+  add(steering, 'trim');
+  add(box(DOOR_B - DOOR_A, 0.2, 0.3, trimMat, (DOOR_A + DOOR_B) / 2, 0.1, 1.4), 'trim');
+
   const windshield = add(box(0.02, 0.85, 2.3, glass, 5.0, 2.0, 0), 'window', 2);
   windshield.rotation.z = 0.06;
   add(box(0.02, 0.6, 1.8, glass, -5.0, 2.05, 0), 'window', 2);
@@ -158,7 +193,18 @@ export function buildBus(route = '21G  BROADWAY') {
 
   return {
     kind: 'bus', group, parts, lights, wheels: b.wheels,
-    colliders: [{ w: 10.1, h: 2.9, d: 2.5, x: 0, y: 1.45, z: 0 }],
+    // Physics: chassis, roof and walls with the same door gap as the body
+    colliders: [
+      { w: 10, h: 0.4, d: 2.5, x: 0, y: 0.2, z: 0 },
+      { w: 10, h: 0.5, d: 2.5, x: 0, y: 2.7, z: 0 },
+      { w: 10, h: 2.05, d: 0.1, x: 0, y: 1.425, z: -1.22 },
+      { w: 6.85, h: 2.05, d: 0.1, x: -1.575, y: 1.425, z: 1.22 },
+      { w: 2.05, h: 2.05, d: 0.1, x: 3.975, y: 1.425, z: 1.22 },
+      { w: 0.1, h: 2.05, d: 2.5, x: 5.0, y: 1.425, z: 0 },
+      { w: 0.1, h: 2.05, d: 2.5, x: -5.0, y: 1.425, z: 0 },
+    ],
+    // Where the player can walk inside, and the step up at the door
+    interior: { minX: -4.95, maxX: 4.95, minZ: -1.18, maxZ: 1.18, y: 0.4, step: { x: 2.4, w: 1.1, minZ: 1.18, maxZ: 1.6, y: 0.2 } },
     footprint: { w: 10.4, d: 2.8 },
   };
 }
