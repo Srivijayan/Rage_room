@@ -34,6 +34,9 @@
   #modes { position: fixed; right: calc(env(safe-area-inset-right) + 16px); bottom: calc(env(safe-area-inset-bottom) + 24px);
     display: flex; flex-direction: column; gap: 10px; }
   #modes button { width: 72px; padding: 12px 0; font-size: 14px; letter-spacing: .5px; }
+  #zoom { position: fixed; right: calc(env(safe-area-inset-right) + 16px); bottom: calc(env(safe-area-inset-bottom) + 262px);
+    display: flex; flex-direction: column; gap: 8px; }
+  #zoom button { width: 44px; height: 44px; padding: 0; font-size: 22px; line-height: 1; margin-left: 28px; }
   #modes button.on { background: var(--pink); border-color: var(--pink); box-shadow: 0 0 16px rgba(255,45,111,.55); }
   #hint { position: fixed; top: calc(env(safe-area-inset-top) + 68px); left: 50%; transform: translateX(-50%);
     background: rgba(20,16,24,.75); padding: 10px 18px; border-radius: 999px; font-size: 14px; white-space: nowrap;
@@ -56,6 +59,10 @@
 <div id="hud"><div class="title">RAGE <span>ROOM</span></div><div id="count">0 smashed</div></div>
 <div id="buttons"><button id="mute" aria-label="Sound on or off">🔊</button><button id="reset">↻ Refill</button></div>
 <div id="hint">Tap to swing · Drag to look around</div>
+<div id="zoom" role="group" aria-label="Zoom">
+  <button id="zoom-in" aria-label="Zoom in">+</button>
+  <button id="zoom-out" aria-label="Zoom out">−</button>
+</div>
 <div id="modes" role="group" aria-label="Weapon">
   <button data-mode="bat" class="on">Bat</button>
   <button data-mode="fists">Fists</button>

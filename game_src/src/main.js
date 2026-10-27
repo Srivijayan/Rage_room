@@ -73,11 +73,21 @@ function adaptResolution(rawDt) {
   }
 }
 
+// Zoom scales the field of view: below 1 zooms in, above 1 zooms out.
+const ZOOM_MIN = 0.4, ZOOM_MAX = 1.25;
+const zoomState = { current: 1, target: 1 };
+function zoomBy(factor) {
+  zoomState.target = THREE.MathUtils.clamp(zoomState.target * factor, ZOOM_MIN, ZOOM_MAX);
+}
+function applyFov() {
+  camera.fov = (camera.aspect < 1 ? 82 : 65) * zoomState.current; // wider view in portrait phones
+  camera.updateProjectionMatrix();
+}
+
 function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
   camera.aspect = w / h;
-  camera.fov = camera.aspect < 1 ? 82 : 65; // wider view in portrait phones
-  camera.updateProjectionMatrix();
+  applyFov();
   renderer.setSize(w, h);
 }
 window.addEventListener('resize', onResize);
@@ -124,8 +134,9 @@ world.solver.iterations = 7;
 const staticMeshes = [];
 
 function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0 } = {}) {
+  let mesh = null;
   if (visible) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
     mesh.position.set(x, y, z);
     mesh.rotation.y = rotY;
     mesh.castShadow = true;
@@ -137,6 +148,7 @@ function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0 } = {}
   body.position.set(x, y, z);
   body.quaternion.setFromEuler(0, rotY, 0);
   world.addBody(body);
+  body.mesh = mesh;
   return body;
 }
 
@@ -163,34 +175,128 @@ stripe.position.set(3.95, 0.003, 1.0);
 stripe.receiveShadow = true;
 scene.add(stripe);
 
-// Table in front of the player
+// Furniture stays put until it is smashed. Then it collapses into planks and
+// everything standing on it falls. Boxes are [w, h, d, x, y, z, material, rotY].
 const TABLE_TOP = 0.82;
-staticBox(2.7, 0.08, 1.0, 0, 0.78, 0.05, MATS.wood);
-for (const [x, z] of [[-1.25, -0.38], [1.25, -0.38], [-1.25, 0.48], [1.25, 0.48]]) {
-  staticBox(0.08, 0.74, 0.08, x, 0.37, z, MATS.darkWood);
-}
-
-// Back shelf
 const SHELF_Z = -2.55;
 const SHELF_LOW = 0.92, SHELF_HIGH = 1.67;
-staticBox(4.2, 0.04, 0.5, 0, SHELF_LOW - 0.02, SHELF_Z, MATS.darkWood);
-staticBox(4.2, 0.04, 0.5, 0, SHELF_HIGH - 0.02, SHELF_Z, MATS.darkWood);
-for (const x of [-2.1, 2.1]) staticBox(0.06, 1.8, 0.5, x, 0.9, SHELF_Z, metalMat);
-
-// Crate for the TV and a small desk for the monitor
-staticBox(0.9, 0.95, 0.7, -2.35, 0.475, -1.3, MATS.wood, { rotY: 0.45 });
-staticBox(0.9, 0.06, 0.6, 2.35, 0.72, -1.3, MATS.darkWood, { rotY: -0.45 });
-staticBox(0.08, 0.7, 0.5, 2.35, 0.35, -1.3, metalMat, { rotY: -0.45 });
-
-// Workbench along the front wall (behind the starting spot)
 const BENCH_TOP = 0.9, BENCH_Z = 4.5;
-staticBox(4, 0.06, 0.7, -0.6, BENCH_TOP - 0.03, BENCH_Z, MATS.darkWood);
-for (const x of [-2.5, 1.3]) staticBox(0.08, 0.84, 0.6, x, 0.42, BENCH_Z, metalMat);
-
-// Bed frame in the far corner of the garage (the mattress on it can be ripped)
 const BED_TOP = 0.3;
-staticBox(2.0, 0.26, 1.5, 13.8, 0.17, 3.6, MATS.darkWood);
-staticBox(0.08, 0.95, 1.55, 14.84, 0.475, 3.6, MATS.darkWood);
+const FURNITURE = [
+  { name: 'table', hp: 6, obstacle: { x: 0, z: 0.05, w: 2.7, d: 1.0, rot: 0 }, boxes: [
+    [2.7, 0.08, 1.0, 0, 0.78, 0.05, MATS.wood],
+    ...[[-1.25, -0.38], [1.25, -0.38], [-1.25, 0.48], [1.25, 0.48]].map(([x, z]) => [0.08, 0.74, 0.08, x, 0.37, z, MATS.darkWood]),
+  ] },
+  { name: 'shelf', hp: 8, obstacle: { x: 0, z: SHELF_Z, w: 4.3, d: 0.5, rot: 0 }, boxes: [
+    [4.2, 0.04, 0.5, 0, SHELF_LOW - 0.02, SHELF_Z, MATS.darkWood],
+    [4.2, 0.04, 0.5, 0, SHELF_HIGH - 0.02, SHELF_Z, MATS.darkWood],
+    [0.06, 1.8, 0.5, -2.1, 0.9, SHELF_Z, metalMat],
+    [0.06, 1.8, 0.5, 2.1, 0.9, SHELF_Z, metalMat],
+  ] },
+  { name: 'tv crate', hp: 6, obstacle: { x: -2.35, z: -1.3, w: 0.9, d: 0.7, rot: 0.45 }, boxes: [
+    [0.9, 0.95, 0.7, -2.35, 0.475, -1.3, MATS.wood, 0.45],
+  ] },
+  { name: 'monitor desk', hp: 4, obstacle: { x: 2.35, z: -1.3, w: 0.9, d: 0.6, rot: -0.45 }, boxes: [
+    [0.9, 0.06, 0.6, 2.35, 0.72, -1.3, MATS.darkWood, -0.45],
+    [0.08, 0.7, 0.5, 2.35, 0.35, -1.3, metalMat, -0.45],
+  ] },
+  { name: 'workbench', hp: 8, obstacle: { x: -0.6, z: BENCH_Z, w: 4, d: 0.7, rot: 0 }, boxes: [
+    [4, 0.06, 0.7, -0.6, BENCH_TOP - 0.03, BENCH_Z, MATS.darkWood],
+    [0.08, 0.84, 0.6, -2.5, 0.42, BENCH_Z, metalMat],
+    [0.08, 0.84, 0.6, 1.3, 0.42, BENCH_Z, metalMat],
+  ] },
+  { name: 'bed', hp: 10, obstacle: { x: 13.85, z: 3.6, w: 2.1, d: 1.55, rot: 0 }, boxes: [
+    [2.0, 0.26, 1.5, 13.8, 0.17, 3.6, MATS.darkWood],
+    [0.08, 0.95, 1.55, 14.84, 0.475, 3.6, MATS.darkWood],
+  ] },
+];
+const furniture = [];
+
+function buildFurniture() {
+  for (const f of furniture) if (!f.broken) removeFurniturePieces(f);
+  furniture.length = 0;
+  for (const def of FURNITURE) {
+    const f = { def, hp: def.hp, broken: false, pieces: [], obstacle: { ...def.obstacle } };
+    for (const [w, h, d, x, y, z, mat, rotY = 0] of def.boxes) {
+      const body = staticBox(w, h, d, x, y, z, mat, { rotY });
+      body.mesh.userData.furniture = f;
+      f.pieces.push({ body, mesh: body.mesh, size: [w, h, d], pos: [x, y, z] });
+    }
+    obstacles.push(f.obstacle);
+    furniture.push(f);
+  }
+}
+
+function removeFurniturePieces(f) {
+  for (const p of f.pieces) {
+    scene.remove(p.mesh);
+    world.removeBody(p.body);
+    const i = staticMeshes.indexOf(p.mesh);
+    if (i >= 0) staticMeshes.splice(i, 1);
+  }
+  const oi = obstacles.indexOf(f.obstacle);
+  if (oi >= 0) obstacles.splice(oi, 1);
+}
+
+// Things standing on a piece of furniture hop when it is hit.
+function joltFurniture(f, strength) {
+  const o = f.obstacle;
+  const r = Math.max(o.w, o.d) / 2 + 0.3;
+  for (const e of entities) {
+    const p = e.body.position;
+    if (e.held || Math.hypot(p.x - o.x, p.z - o.z) > r) continue;
+    e.body.wakeUp();
+    e.body.velocity.set(e.body.velocity.x + rand(-0.4, 0.4), e.body.velocity.y + rand(0.6, 1.2) * strength,
+      e.body.velocity.z + rand(-0.4, 0.4));
+  }
+}
+
+function hitFurniture(f, hit, dir, weapon) {
+  if (weapon === 'knife') {
+    // A knife only carves the wood
+    addCut(hit, rand(0.1, 0.2));
+    sfx.scrape();
+    haptic('hit');
+    return;
+  }
+  const dmg = WEAPONS[weapon].damage;
+  f.hp -= dmg;
+  joltFurniture(f, dmg * 0.6);
+  if (f.hp <= 0) { collapseFurniture(f, dir); return; }
+  addCut(hit, rand(0.15, 0.3)); // a crack in the wood
+  burst(hit.point, 0xb08a60, 25, 1.8, false);
+  if (weapon === 'fists') sfx.punch(); else sfx.wood();
+  shake = Math.max(shake, 0.035);
+  haptic('hit');
+}
+
+function collapseFurniture(f, dir) {
+  f.broken = true;
+  removeFurniturePieces(f);
+  for (const p of f.pieces) {
+    const [w, h, d] = p.size;
+    const [x, y, z] = p.pos;
+    const n = THREE.MathUtils.clamp(Math.round((w * d + w * h + h * d) * 6), 2, 10);
+    for (let i = 0; i < n; i++) {
+      const scale = new THREE.Vector3(
+        Math.min(w, rand(0.2, 0.55)),
+        Math.min(h, Math.max(rand(0.03, 0.06), h * rand(0.3, 0.6))),
+        Math.min(d, rand(0.06, 0.16)),
+      );
+      const pos = new THREE.Vector3(x + rand(-0.4, 0.4) * w, y + rand(-0.4, 0.4) * h, z + rand(-0.4, 0.4) * d);
+      const vel = dir.clone().multiplyScalar(rand(1, 3)).add(new THREE.Vector3(rand(-1.5, 1.5), rand(0.5, 2.5), rand(-1.5, 1.5)));
+      addShard(boxChunk, p.mesh.material, pos, scale, vel);
+    }
+    burst(new THREE.Vector3(x, y, z), 0xb08a60, 30, 2, false);
+  }
+  // Everything that was resting on it is now in free fall
+  for (const e of entities) e.body.wakeUp();
+  countSmash();
+  sfx.wood();
+  sfx.thud();
+  shake = Math.max(shake, 0.07);
+  haptic('heavy');
+}
 
 // Neon signs
 function neonSign(text, x, y, z) {
@@ -206,14 +312,8 @@ const neons = [neonSign('SMASH IT', 0, 2.45, -2.88), neonSign('WRECK IT', 9.5, 3
 
 // Footprints of the furniture, so the player walks around it instead of through it.
 const PLAYER_R = 0.28;
-const obstacles = [
-  { x: 0, z: 0.05, w: 2.7, d: 1.0, rot: 0 },
-  { x: 0, z: SHELF_Z, w: 4.3, d: 0.5, rot: 0 },
-  { x: -2.35, z: -1.3, w: 0.9, d: 0.7, rot: 0.45 },
-  { x: 2.35, z: -1.3, w: 0.9, d: 0.6, rot: -0.45 },
-  { x: -0.6, z: BENCH_Z, w: 4, d: 0.7, rot: 0 },
-  { x: 13.85, z: 3.6, w: 2.1, d: 1.55, rot: 0 },
-];
+const obstacles = []; // furniture and vehicles add theirs
+buildFurniture();
 
 // The player's body pushes bottles and shards around when walking into them.
 const playerBody = new CANNON.Body({ type: CANNON.Body.KINEMATIC, shape: new CANNON.Box(new CANNON.Vec3(PLAYER_R, 0.85, PLAYER_R)) });
@@ -568,6 +668,7 @@ function resetRoom() {
   shards.length = 0;
   pendingBreaks.clear();
   tweens.length = 0;
+  buildFurniture();
   layoutRoom();
   buildVehicles();
   ui.cleared.hidden = true;
@@ -1013,6 +1114,7 @@ function tryGrab(ndc) {
   if (outOfReach(hit, WEAPONS.grab.reach)) { toast('Walk closer to grab'); return; }
   const ent = hit.object.userData.ent;
   if (hit.object.userData.part) { toast('Way too heavy to lift'); return; }
+  if (hit.object.userData.furniture) { toast('Too heavy to lift — smash it instead'); return; }
   if (!ent || !ent.alive) return;
   if (ent.type.mass > MAX_LIFT) { toast('Too heavy to lift'); return; }
   held = ent;
@@ -1132,7 +1234,10 @@ function doHit(ndc, weapon) {
     return;
   }
 
-  // Wall / table / floor
+  const f = hit.object.userData.furniture;
+  if (f && !f.broken) { hitFurniture(f, hit, dir, weapon); return; }
+
+  // Wall / floor
   burst(hit.point, 0x9a8f85, 20, 1.5, false);
   if (weapon === 'fists') sfx.punch(); else sfx.thud();
   shake = Math.max(shake, 0.02);
@@ -1204,12 +1309,30 @@ document.addEventListener('pointerlockerror', () => { /* not allowed here: drag-
 document.addEventListener('mousemove', (e) => {
   // Some browsers report one huge jump right after locking; ignore spikes
   if (!mouseLocked() || Math.abs(e.movementX) > 250 || Math.abs(e.movementY) > 250) return;
-  turnView(-e.movementX * 0.0022, -e.movementY * 0.0022);
+  const k = 0.0022 * zoomState.current; // finer aim when zoomed in
+  turnView(-e.movementX * k, -e.movementY * k);
 });
+
+// Two fingers on the screen pinch to zoom.
+const touches = new Map();
+let pinchDist = 0;
+const touchSpread = () => {
+  const [a, b] = [...touches.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
 
 canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
   if (mouseLocked()) { act(CENTER); return; }
+  if (e.pointerType === 'touch') {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) {
+      pinchDist = touchSpread();
+      drag.id = null; // a pinch is neither a look-drag nor a tap
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* optional */ }
+      return;
+    }
+  }
   if (!isTouch && e.pointerType === 'mouse' && canvas.requestPointerLock) {
     try {
       const req = canvas.requestPointerLock();
@@ -1224,16 +1347,27 @@ canvas.addEventListener('pointerdown', (e) => {
   try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* refused while the mouse is being locked */ }
 });
 canvas.addEventListener('pointermove', (e) => {
+  if (touches.has(e.pointerId)) {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size >= 2) {
+      const dist = touchSpread();
+      if (pinchDist > 0 && dist > 0) zoomBy(pinchDist / dist);
+      pinchDist = dist;
+      return;
+    }
+  }
   if (e.pointerId !== drag.id) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 10) drag.moved = true;
   if (drag.moved) {
-    const k = 1.5 / Math.min(window.innerWidth, window.innerHeight);
+    const k = (1.5 / Math.min(window.innerWidth, window.innerHeight)) * zoomState.current;
     turnView(-dx * k, -dy * k);
   }
   drag.x = e.clientX; drag.y = e.clientY;
 });
 const endPointer = (e) => {
+  touches.delete(e.pointerId);
+  if (touches.size < 2) pinchDist = 0;
   if (e.pointerId !== drag.id || mouseLocked()) { if (e.pointerId === drag.id) drag.id = null; return; }
   drag.id = null;
   if (!drag.moved && e.type === 'pointerup') {
@@ -1244,12 +1378,23 @@ const endPointer = (e) => {
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 
+function showZoom() { toast(`Zoom ${(1 / zoomState.target).toFixed(1)}×`); }
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  zoomBy(Math.exp(e.deltaY * 0.0012));
+  showZoom();
+}, { passive: false });
+document.getElementById('zoom-in').addEventListener('click', () => { zoomBy(1 / 1.3); showZoom(); });
+document.getElementById('zoom-out').addEventListener('click', () => { zoomBy(1.3); showZoom(); });
+
 const keys = new Set();
 const MODE_KEYS = { Digit1: 'bat', Digit2: 'fists', Digit3: 'knife', Digit4: 'grab' };
 window.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'Space') { e.preventDefault(); act(new THREE.Vector2(0, 0)); }
   if (e.code === 'KeyR') resetRoom();
+  if (e.code === 'Equal' || e.code === 'NumpadAdd') { zoomBy(1 / 1.2); showZoom(); }
+  if (e.code === 'Minus' || e.code === 'NumpadSubtract') { zoomBy(1.2); showZoom(); }
   if (MODE_KEYS[e.code]) setMode(MODE_KEYS[e.code]);
   if (e.code === 'KeyQ') setMode({ bat: 'fists', fists: 'knife', knife: 'grab', grab: 'bat' }[mode]);
 });
@@ -1290,8 +1435,8 @@ for (const b of document.querySelectorAll('#modes button')) {
 if (isTouch) document.body.classList.add('touch');
 if (new URLSearchParams(location.search).has('app')) document.body.classList.add('in-app');
 document.getElementById('hint').textContent = isTouch
-  ? 'Joystick to walk · Drag to look · Tap to hit'
-  : 'Click to lock the mouse · WASD to walk · 1-4 to switch · Esc to unlock';
+  ? 'Joystick to walk · Drag to look · Pinch to zoom · Tap to hit'
+  : 'Click to lock the mouse · WASD to walk · Wheel to zoom · 1-4 to switch';
 
 const WALK_SPEED = 2.6;
 const JOY_DEAD = 0.15;
@@ -1371,6 +1516,10 @@ function frame() {
   const ease = 1 - Math.exp(-dt * 30);
   look.yaw += (look.targetYaw - look.yaw) * ease;
   look.pitch += (look.targetPitch - look.pitch) * ease;
+  if (Math.abs(zoomState.target - zoomState.current) > 0.0005) {
+    zoomState.current += (zoomState.target - zoomState.current) * (1 - Math.exp(-dt * 14));
+    applyFov();
+  }
 
   updatePlayer(dt);
   slowMo = Math.max(0, slowMo - dt);
