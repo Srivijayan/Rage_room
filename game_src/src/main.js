@@ -965,6 +965,8 @@ function spillStuffing(kind, point, amount = 1) {
 const cutMat = new THREE.MeshBasicMaterial({ color: 0x140b08 });
 const scratchMat = new THREE.MeshBasicMaterial({ color: 0xd8dde2 });
 const UP = new THREE.Vector3(0, 1, 0);
+const noRaycast = () => {};
+const markScale = new THREE.Vector3();
 function addCut(hit, len, mat = cutMat) {
   if (!hit.face) return;
   const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
@@ -973,8 +975,17 @@ function addCut(hit, len, mat = cutMat) {
   m.position.copy(hit.point).addScaledVector(n, 0.002);
   m.quaternion.setFromUnitVectors(UP, n);
   m.rotateY(rand(0, Math.PI));
-  m.userData = { ...hit.object.userData };
-  hit.object.attach(m);
+  // Marks can't be hit, so the next stab reaches the surface underneath.
+  m.raycast = noRaycast;
+  // Attach to the nearest evenly scaled ancestor: a stretched parent (a flat
+  // tyre, a squashed sphere) would distort the mark, sometimes enormously.
+  let parent = hit.object;
+  while (parent.parent && parent.parent !== scene) {
+    parent.getWorldScale(markScale);
+    if (Math.abs(markScale.x - markScale.y) < 1e-3 && Math.abs(markScale.y - markScale.z) < 1e-3) break;
+    parent = parent.parent;
+  }
+  parent.attach(m);
 }
 
 // Small animations (tyres going flat)
