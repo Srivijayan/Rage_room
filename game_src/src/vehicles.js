@@ -33,7 +33,8 @@ function makeBuilder() {
   const group = new THREE.Group();
   const parts = [];
   const add = (mesh, kind, hp = 1) => {
-    mesh.castShadow = true;
+    // Only bodywork casts shadows; glass, trim and lights would just add draw calls
+    mesh.castShadow = kind === 'panel';
     mesh.receiveShadow = true;
     group.add(mesh);
     parts.push({ mesh, kind, hp });
