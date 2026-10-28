@@ -13,8 +13,8 @@ import { LEVELS, SHELLS, UNLOCK_AT, BUS_X, BUS_Z } from './levels.js';
 const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 // Phones get a lower starting resolution and no MSAA on very dense screens;
 // adaptResolution() then tunes the resolution to keep the frame rate up.
-const MAX_PIXEL_RATIO = Math.min(window.devicePixelRatio, isTouch ? 1.5 : 2);
-const MIN_PIXEL_RATIO = isTouch ? 0.75 : 1;
+const MAX_PIXEL_RATIO = Math.min(window.devicePixelRatio, 1.5);
+const MIN_PIXEL_RATIO = 0.75; // laptops with built-in graphics need room to drop too
 const renderer = new THREE.WebGLRenderer({
   antialias: !(isTouch && window.devicePixelRatio > 1.5),
   powerPreference: 'high-performance',
@@ -23,6 +23,7 @@ renderer.setPixelRatio(MAX_PIXEL_RATIO);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.shadowMap.autoUpdate = false; // refreshed every other frame in frame()
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 document.getElementById('app').appendChild(renderer.domElement);
@@ -139,13 +140,13 @@ world.solver.iterations = 7;
 
 const staticMeshes = [];
 
-function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0, parent = scene } = {}) {
+function staticBox(w, h, d, x, y, z, material, { visible = true, rotY = 0, parent = scene, castShadow = true } = {}) {
   let mesh = null;
   if (visible) {
     mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
     mesh.position.set(x, y, z);
     mesh.rotation.y = rotY;
-    mesh.castShadow = true;
+    mesh.castShadow = castShadow;
     mesh.receiveShadow = true;
     parent.add(mesh);
     staticMeshes.push(mesh);
@@ -175,7 +176,8 @@ function neonSign(text, x, y, z, parent) {
 const shellGroups = {};
 for (const [key, shell] of Object.entries(SHELLS)) {
   const group = new THREE.Group();
-  for (const [w, h, d, x, y, z, mat] of shell.boxes) staticBox(w, h, d, x, y, z, mat, { parent: group });
+  // Walls and floors only receive shadows: casting them would just redraw the room
+  for (const [w, h, d, x, y, z, mat] of shell.boxes) staticBox(w, h, d, x, y, z, mat, { parent: group, castShadow: false });
   for (const [w, d, x, y, z, mat] of shell.ceilings) {
     const c = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
     c.rotation.x = Math.PI / 2; // facing down
@@ -683,9 +685,31 @@ function loadLevel(index) {
   look.yaw = look.targetYaw = level.spawn.yaw;
   look.pitch = look.targetPitch = -0.18;
   ui.levelName.textContent = `Level ${index + 1} · ${level.name}`;
+  warmUpShaders();
   ui.cleared.hidden = true;
   ui.map.hidden = true;
   updateHud();
+}
+
+// Compile every material the level can show (cracks, cut marks, particles,
+// shards) while it loads, so the first smash doesn't freeze the game.
+let warmGroup = null;
+function buildWarmGroup() {
+  const group = new THREE.Group();
+  const geo = new THREE.BoxGeometry(0.01, 0.01, 0.01);
+  for (const mat of [cutMat, scratchMat, ...crackedGlass, MATS.foam, MATS.glass, MATS.board]) group.add(new THREE.Mesh(geo, mat));
+  for (const blending of [THREE.AdditiveBlending, THREE.NormalBlending]) {
+    group.add(new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3)),
+      new THREE.PointsMaterial({ size: 0.03, transparent: true, depthWrite: false, blending })));
+  }
+  return group;
+}
+function warmUpShaders() {
+  warmGroup ??= buildWarmGroup();
+  warmGroup.position.copy(camera.position);
+  scene.add(warmGroup);
+  try { renderer.compile(scene, camera); } catch (_) { /* compiling early is only an optimisation */ }
+  scene.remove(warmGroup);
 }
 
 function levelProgress() {
@@ -1422,8 +1446,9 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (!isTouch && e.pointerType === 'mouse' && canvas.requestPointerLock) {
     try {
-      const req = canvas.requestPointerLock();
-      if (req && req.catch) req.catch(() => {});
+      // Raw mouse input avoids the sudden view jumps some browsers produce
+      const req = canvas.requestPointerLock({ unadjustedMovement: true });
+      if (req && req.catch) req.catch(() => { try { canvas.requestPointerLock(); } catch (_) { /* drag-to-look still works */ } });
     } catch (_) { /* fall back to drag-to-look */ }
   }
   if (drag.id !== null) return;
@@ -1619,6 +1644,7 @@ let progressTick = 0;
 let shake = 0;
 let slowMo = 0;
 let screenTick = 0;
+let shadowFrame = false;
 const clock = new THREE.Clock();
 
 function frame() {
@@ -1693,6 +1719,8 @@ function frame() {
   progressTick += dt;
   if (progressTick > 0.3) { progressTick = 0; checkLevelProgress(); }
 
+  shadowFrame = !shadowFrame;
+  renderer.shadowMap.needsUpdate = shadowFrame;
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
